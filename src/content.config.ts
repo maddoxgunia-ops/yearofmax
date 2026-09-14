@@ -20,6 +20,8 @@ const projects = defineCollection({
     ...shared,
     status: z.enum(['building', 'shipped', 'archived']),
     url: z.string().url().optional(),
+    cover: z.string().optional(),
+    splash: z.string().optional(),
   }),
 });
 

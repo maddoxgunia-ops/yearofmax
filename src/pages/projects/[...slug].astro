@@ -17,6 +17,10 @@ type Props = { entry: CollectionEntry<'projects'> };
 const { entry } = Astro.props;
 const { Content } = await render(entry);
 const recent = isRecent(entry.data.date);
+
+// Build-time check so a missing asset never renders as a broken image.
+const { existsSync } = await import('node:fs');
+const hasSplash = !!entry.data.splash && existsSync(`public${entry.data.splash}`);
 ---
 
 <Base title={entry.data.title} description={entry.data.summary}>
@@ -39,6 +43,12 @@ const recent = isRecent(entry.data.date);
       <ul class="detail__tags">
         {entry.data.tags.map((tag) => <li class="label">{tag}</li>)}
       </ul>
+    )}
+
+    {hasSplash && (
+      <figure class="detail__splash">
+        <img src={entry.data.splash} alt="" loading="lazy" decoding="async" />
+      </figure>
     )}
 
     <div class="prose measure"><Content /></div>
@@ -83,6 +93,17 @@ const recent = isRecent(entry.data.date);
     flex-wrap: wrap;
     gap: 1rem;
     margin-top: 1.5rem;
+  }
+
+  .detail__splash {
+    margin: 3rem 0 0;
+    background: var(--ink);
+    overflow: hidden;
+  }
+
+  .detail__splash img {
+    width: 100%;
+    height: auto;
   }
 
   .prose {

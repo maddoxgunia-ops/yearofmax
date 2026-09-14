@@ -3,16 +3,18 @@ export const RECENT_DAYS = 14;
 
 const DAY_MS = 86_400_000;
 
-const FORMATTER = new Intl.DateTimeFormat('en-GB', {
-  day: '2-digit',
-  month: 'short',
-  year: '2-digit',
-  timeZone: 'UTC',
-});
+/** Same three-letter set the year track uses, so the two never disagree. */
+const MONTHS = [
+  'jan', 'feb', 'mar', 'apr', 'may', 'jun',
+  'jul', 'aug', 'sep', 'oct', 'nov', 'dec',
+] as const;
 
-/** e.g. "14 sep 26" — derived from the entry date, not authored copy. */
+/** e.g. "13 sep 26" — derived from the entry date, not authored copy. */
 export function formatDate(date: Date): string {
-  return FORMATTER.format(date).toLowerCase();
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  const month = MONTHS[date.getUTCMonth()];
+  const year = String(date.getUTCFullYear()).slice(-2);
+  return `${day} ${month} ${year}`;
 }
 
 export function isRecent(date: Date, now: Date = new Date()): boolean {
