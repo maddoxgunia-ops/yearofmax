@@ -30,16 +30,15 @@ const feedUrl = new URL('/rss.xml', Astro.site).href;
     <meta name="description" content={description ?? ''} />
     <link rel="canonical" href={canonical} />
 
-    {/* RSS autodiscovery. title="" pending copy. */}
-    <link rel="alternate" type="application/rss+xml" title="" href={feedUrl} />
+    <link rel="alternate" type="application/rss+xml" title="yearofmax" href={feedUrl} />
 
-    {/* OpenGraph. og:site_name left empty pending copy. */}
+    {/* OpenGraph */}
     <meta property="og:type" content="website" />
     <meta property="og:url" content={canonical} />
     <meta property="og:title" content={title ?? ''} />
     <meta property="og:description" content={description ?? ''} />
     <meta property="og:image" content={ogImageUrl} />
-    <meta property="og:site_name" content="" />
+    <meta property="og:site_name" content="yearofmax" />
     <meta property="og:locale" content="en_GB" />
 
     {/* Twitter */}
@@ -54,12 +53,11 @@ const feedUrl = new URL('/rss.xml', Astro.site).href;
   <body>
     <YearTrack />
 
-    {/* Link labels deliberately empty — see the list handed back at Step 4. */}
     <nav class="wrap site-nav">
       <ul>
-        <li><a href="/"></a></li>
-        <li><a href="/log/"></a></li>
-        <li><a href="/projects/"></a></li>
+        <li><a href="/">home</a></li>
+        <li><a href="/log/">log</a></li>
+        <li><a href="/projects/">projects</a></li>
       </ul>
     </nav>
 
@@ -69,9 +67,9 @@ const feedUrl = new URL('/rss.xml', Astro.site).href;
 
     <footer class="wrap site-footer">
       <ul>
-        <li><a href="/rss.xml"></a></li>
+        <li><a href="/rss.xml">rss</a></li>
       </ul>
-      <p class="label"></p>
+      <p class="label">Max</p>
     </footer>
 
     <script>
@@ -100,9 +98,7 @@ const feedUrl = new URL('/rss.xml', Astro.site).href;
         font-size: var(--size-label);
         letter-spacing: var(--track-label);
         color: var(--graphite);
-        /* Empty anchors have no box until labels land. */
         display: inline-block;
-        min-height: 1em;
       }
 
       .site-nav a:hover,

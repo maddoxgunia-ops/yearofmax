@@ -19,16 +19,16 @@ const today = Date.UTC(year, now.getUTCMonth(), now.getUTCDate());
 const dayOfYear = Math.round((today - yearStart) / DAY_MS) + 1;
 ---
 
-<Base title="" description="">
+<Base title="yearofmax" description="working notes and projects, logged as they happen.">
   <section class="hero" data-hero>
     <p class="counter" data-counter>{dayOfYear}</p>
     <p class="label" data-counter-total>{totalDays}</p>
-    <h1 class="heading"></h1>
-    <p class="measure"></p>
+    <h1 class="heading">everything i make, logged as i make it.</h1>
+    <p class="measure">no drafts folder, no tidying up afterwards. entries go up dated, projects go up unfinished.</p>
   </section>
 
   <section class="latest">
-    <h2 class="label"></h2>
+    <h2 class="label">latest</h2>
 
     {entries.length > 0 ? (
       <ul class="entries">
@@ -43,7 +43,7 @@ const dayOfYear = Math.round((today - yearStart) / DAY_MS) + 1;
         ))}
       </ul>
     ) : (
-      <div class="empty" data-empty><p class="label"></p></div>
+      <div class="empty" data-empty><p class="label">nothing logged yet.</p></div>
     )}
   </section>
 </Base>

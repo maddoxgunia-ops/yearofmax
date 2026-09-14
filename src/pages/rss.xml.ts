@@ -11,9 +11,8 @@ export async function GET(context: APIContext) {
   const entries = (await getCollection('log', ({ data }) => !data.draft)).sort(byDateDesc);
 
   return rss({
-    // Feed copy pending — see the list of strings handed back at Step 8.
-    title: '',
-    description: '',
+    title: 'yearofmax',
+    description: 'working notes and projects, logged as they happen.',
     site: context.site,
     trailingSlash: true,
     items: entries.map((entry) => ({
