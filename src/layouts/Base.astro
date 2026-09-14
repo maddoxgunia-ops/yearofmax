@@ -1,0 +1,125 @@
+---
+import '../styles/global.css';
+import 'lenis/dist/lenis.css';
+import { ClientRouter } from 'astro:transitions';
+import YearTrack from '../components/YearTrack.astro';
+
+interface Props {
+  title?: string;
+  description?: string;
+  ogImage?: string;
+}
+
+const { title, description, ogImage } = Astro.props;
+
+const canonical = new URL(Astro.url.pathname, Astro.site).href;
+const ogImageUrl = new URL(ogImage ?? '/og.png', Astro.site).href;
+const feedUrl = new URL('/rss.xml', Astro.site).href;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="generator" content={Astro.generator} />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" href="/favicon.ico" />
+
+    <title>{title}</title>
+    <meta name="description" content={description ?? ''} />
+    <link rel="canonical" href={canonical} />
+
+    {/* RSS autodiscovery. title="" pending copy. */}
+    <link rel="alternate" type="application/rss+xml" title="" href={feedUrl} />
+
+    {/* OpenGraph. og:site_name left empty pending copy. */}
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:title" content={title ?? ''} />
+    <meta property="og:description" content={description ?? ''} />
+    <meta property="og:image" content={ogImageUrl} />
+    <meta property="og:site_name" content="" />
+    <meta property="og:locale" content="en_GB" />
+
+    {/* Twitter */}
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title ?? ''} />
+    <meta name="twitter:description" content={description ?? ''} />
+    <meta name="twitter:image" content={ogImageUrl} />
+
+    <ClientRouter />
+  </head>
+
+  <body>
+    <YearTrack />
+
+    {/* Link labels deliberately empty — see the list handed back at Step 4. */}
+    <nav class="wrap site-nav">
+      <ul>
+        <li><a href="/"></a></li>
+        <li><a href="/log/"></a></li>
+        <li><a href="/projects/"></a></li>
+      </ul>
+    </nav>
+
+    <main class="wrap">
+      <slot />
+    </main>
+
+    <footer class="wrap site-footer">
+      <ul>
+        <li><a href="/rss.xml"></a></li>
+      </ul>
+      <p class="label"></p>
+    </footer>
+
+    <script>
+      import { init } from '../scripts/motion';
+
+      // astro:page-load, not DOMContentLoaded: this fires on first paint AND
+      // after every ClientRouter navigation. init() is idempotent.
+      document.addEventListener('astro:page-load', init);
+    </script>
+
+    <style>
+      .site-nav {
+        padding-top: 1.5rem;
+        padding-bottom: 1.5rem;
+      }
+
+      .site-nav ul,
+      .site-footer ul {
+        display: flex;
+        gap: 1.5rem;
+      }
+
+      .site-nav a,
+      .site-footer a {
+        font-stretch: var(--wdth-narrow);
+        font-size: var(--size-label);
+        letter-spacing: var(--track-label);
+        color: var(--graphite);
+        /* Empty anchors have no box until labels land. */
+        display: inline-block;
+        min-height: 1em;
+      }
+
+      .site-nav a:hover,
+      .site-footer a:hover {
+        color: var(--ink);
+      }
+
+      .site-nav a[aria-current='page'] {
+        color: var(--ink);
+      }
+
+      .site-footer {
+        padding-top: 6rem;
+        padding-bottom: 3rem;
+        border-top: var(--hairline) solid var(--rule);
+        margin-top: 8rem;
+      }
+    </style>
+  </body>
+</html>

@@ -1,0 +1,48 @@
+---
+import { getCollection } from 'astro:content';
+import Base from '../../layouts/Base.astro';
+import EntryRow from '../../components/EntryRow.astro';
+import { byDateDesc, isRecent } from '../../lib/entries';
+
+const now = new Date();
+const entries = (await getCollection('projects', ({ data }) => !data.draft)).sort(byDateDesc);
+---
+
+<Base title="" description="">
+  <section class="index">
+    <h1 class="heading"></h1>
+
+    {entries.length > 0 ? (
+      <ul class="entries">
+        {entries.map((entry) => (
+          <EntryRow
+            href={`/projects/${entry.id}/`}
+            title={entry.data.title}
+            summary={entry.data.summary}
+            date={entry.data.date}
+            status={entry.data.status}
+            recent={isRecent(entry.data.date, now)}
+          />
+        ))}
+      </ul>
+    ) : (
+      <div class="empty" data-empty><p class="label"></p></div>
+    )}
+  </section>
+</Base>
+
+<style>
+  .index {
+    padding-top: 3rem;
+    padding-bottom: 4rem;
+  }
+
+  .index h1 {
+    margin-bottom: 2.5rem;
+  }
+
+  .empty {
+    border-top: var(--hairline) solid var(--rule);
+    padding: 1.75rem 0;
+  }
+</style>

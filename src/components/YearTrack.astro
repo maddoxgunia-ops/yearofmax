@@ -1,0 +1,187 @@
+---
+// Day-of-year and year length, computed in UTC at build time. The client
+// recomputes on load so a stale build never shows the wrong progress.
+const MONTHS = [
+  'jan', 'feb', 'mar', 'apr', 'may', 'jun',
+  'jul', 'aug', 'sep', 'oct', 'nov', 'dec',
+] as const;
+
+const DAY_MS = 86_400_000;
+
+const now = new Date();
+const year = now.getUTCFullYear();
+const yearStart = Date.UTC(year, 0, 1);
+const yearEnd = Date.UTC(year + 1, 0, 1);
+
+const totalDays = Math.round((yearEnd - yearStart) / DAY_MS);
+const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+const dayOfYear = Math.round((today - yearStart) / DAY_MS) + 1;
+const yearProgress = dayOfYear / totalDays;
+
+const ticks = MONTHS.map((label, index) => ({
+  label,
+  percent: ((Date.UTC(year, index, 1) - yearStart) / DAY_MS / totalDays) * 100,
+}));
+---
+
+<div class="track-slot" data-track-slot>
+  <div
+    class="track"
+    data-track
+    data-total-days={totalDays}
+    data-day-of-year={dayOfYear}
+    style={`--year: ${yearProgress}`}
+  >
+    <div class="track__bar">
+      <div class="track__fill"></div>
+      {ticks.map((tick) => (
+        <span class="track__tick" style={`left: ${tick.percent}%`}></span>
+      ))}
+      <span class="track__marker"></span>
+    </div>
+
+    <ol class="track__months">
+      {ticks.map((tick) => (
+        <li class="track__month label" style={`left: ${tick.percent}%`}>{tick.label}</li>
+      ))}
+    </ol>
+  </div>
+</div>
+
+<style>
+  /* The slot holds the track's height in flow so pinning cannot shift the
+     page. Its height is set from JS the moment the track goes fixed. */
+  .track-slot {
+    position: relative;
+  }
+
+  .track {
+    position: relative;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 20;
+    padding: 1.25rem var(--margin) 0.75rem;
+    background: var(--paper);
+  }
+
+  .track.is-pinned {
+    position: fixed;
+  }
+
+  .track__bar {
+    position: relative;
+    height: var(--hairline);
+    background: var(--rule);
+  }
+
+  /* Resting state is the finished state: without JS the bar shows the year's
+     real progress. With motion on, scroll drives it (see motion.ts). */
+  .track__fill {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    background: var(--ink);
+    width: calc(var(--year) * 100%);
+  }
+
+  .track__marker {
+    position: absolute;
+    top: 50%;
+    left: calc(var(--year) * 100%);
+    width: 2px;
+    height: 11px;
+    margin-top: -5.5px;
+    background: var(--signal);
+  }
+
+  :global(html[data-motion='on']) .track__fill {
+    width: calc(var(--fill, 0) * 100%);
+  }
+
+  :global(html[data-motion='on']) .track__marker {
+    left: calc(var(--fill, 0) * 100%);
+  }
+
+  .track__tick {
+    position: absolute;
+    top: 0;
+    width: var(--hairline);
+    height: 5px;
+    background: var(--rule);
+  }
+
+  .track__months {
+    position: relative;
+    height: 1.4em;
+    margin-top: 0.5rem;
+  }
+
+  .track__month {
+    position: absolute;
+    top: 0;
+    color: var(--graphite);
+    transform: translateX(-0.05em);
+  }
+</style>
+
+<script>
+  import { ScrollTrigger } from 'gsap/ScrollTrigger';
+
+  const DAY_MS = 86_400_000;
+
+  function yearProgressNow(): number {
+    const now = new Date();
+    const year = now.getUTCFullYear();
+    const yearStart = Date.UTC(year, 0, 1);
+    const totalDays = Math.round((Date.UTC(year + 1, 0, 1) - yearStart) / DAY_MS);
+    const today = Date.UTC(year, now.getUTCMonth(), now.getUTCDate());
+    const dayOfYear = Math.round((today - yearStart) / DAY_MS) + 1;
+    return dayOfYear / totalDays;
+  }
+
+  /** Correct the build-time value against the visitor's actual date. */
+  function refreshYear(): void {
+    const track = document.querySelector<HTMLElement>('[data-track]');
+    if (!track) return;
+    track.style.setProperty('--year', String(yearProgressNow()));
+  }
+
+  function setup(): void {
+    const track = document.querySelector<HTMLElement>('[data-track]');
+    const slot = document.querySelector<HTMLElement>('[data-track-slot]');
+    if (!track || !slot) return;
+
+    const cap = yearProgressNow();
+
+    // Fill follows scroll progress but never runs past the year itself.
+    ScrollTrigger.create({
+      trigger: document.documentElement,
+      start: 'top top',
+      end: 'max',
+      onUpdate: (self) => {
+        track.style.setProperty('--fill', String(Math.min(self.progress, cap)));
+      },
+      onRefresh: (self) => {
+        track.style.setProperty('--fill', String(Math.min(self.progress, cap)));
+      },
+    });
+
+    // Pin to the top once the hero has left. Pages without a hero pin at once.
+    const hero = document.querySelector<HTMLElement>('[data-hero]');
+
+    ScrollTrigger.create({
+      trigger: hero ?? document.documentElement,
+      start: hero ? 'bottom top' : 'top top',
+      end: 'max',
+      onToggle: (self) => {
+        slot.style.height = self.isActive ? `${track.offsetHeight}px` : '';
+        track.classList.toggle('is-pinned', self.isActive);
+      },
+    });
+  }
+
+  document.addEventListener('astro:page-load', refreshYear);
+  document.addEventListener('motion:ready', setup);
+</script>
