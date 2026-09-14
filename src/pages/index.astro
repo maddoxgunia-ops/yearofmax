@@ -49,22 +49,24 @@ const dayOfYear = Math.round((today - yearStart) / DAY_MS) + 1;
 </Base>
 
 <style>
+  /* Vertical rhythm compresses on short viewports so the page keeps
+     fitting the screen without shrinking the type. */
   .hero {
-    padding-top: 4rem;
-    padding-bottom: 6rem;
+    padding-top: clamp(1.25rem, 4vh, 3rem);
+    padding-bottom: clamp(1.5rem, 5vh, 4rem);
   }
 
   .hero h1,
   .hero .measure {
-    margin-top: 2rem;
+    margin-top: clamp(0.75rem, 2.5vh, 2rem);
   }
 
   .latest {
-    padding-bottom: 4rem;
+    padding-bottom: 2rem;
   }
 
   .latest h2 {
-    margin-bottom: 1.25rem;
+    margin-bottom: clamp(0.6rem, 1.6vh, 1.25rem);
   }
 
   .empty {

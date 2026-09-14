@@ -65,13 +65,6 @@ const feedUrl = new URL('/rss.xml', Astro.site).href;
       <slot />
     </main>
 
-    <footer class="wrap site-footer">
-      <ul>
-        <li><a href="/rss.xml">rss</a></li>
-      </ul>
-      <p class="label">Max</p>
-    </footer>
-
     <script>
       import { init } from '../scripts/motion';
 
@@ -81,19 +74,22 @@ const feedUrl = new URL('/rss.xml', Astro.site).href;
     </script>
 
     <style>
+      /* Fill the viewport so a short page never invents a scrollbar. */
+      main {
+        flex: 1 0 auto;
+      }
+
       .site-nav {
         padding-top: 1.5rem;
         padding-bottom: 1.5rem;
       }
 
-      .site-nav ul,
-      .site-footer ul {
+      .site-nav ul {
         display: flex;
         gap: 1.5rem;
       }
 
-      .site-nav a,
-      .site-footer a {
+      .site-nav a {
         font-stretch: var(--wdth-narrow);
         font-size: var(--size-label);
         letter-spacing: var(--track-label);
@@ -101,20 +97,12 @@ const feedUrl = new URL('/rss.xml', Astro.site).href;
         display: inline-block;
       }
 
-      .site-nav a:hover,
-      .site-footer a:hover {
+      .site-nav a:hover {
         color: var(--ink);
       }
 
       .site-nav a[aria-current='page'] {
         color: var(--ink);
-      }
-
-      .site-footer {
-        padding-top: 6rem;
-        padding-bottom: 3rem;
-        border-top: var(--hairline) solid var(--rule);
-        margin-top: 8rem;
       }
     </style>
   </body>
