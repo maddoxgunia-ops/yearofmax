@@ -58,6 +58,7 @@ const feedUrl = new URL('/rss.xml', Astro.site).href;
         <li><a href="/">home</a></li>
         <li><a href="/log/">log</a></li>
         <li><a href="/projects/">projects</a></li>
+        <li class="site-nav__end"><a href="/chess/" data-astro-reload>chess</a></li>
       </ul>
     </nav>
 
@@ -87,6 +88,11 @@ const feedUrl = new URL('/rss.xml', Astro.site).href;
       .site-nav ul {
         display: flex;
         gap: 1.5rem;
+      }
+
+      /* Pushed to the opposite end of the nav row. */
+      .site-nav__end {
+        margin-left: auto;
       }
 
       .site-nav a {
