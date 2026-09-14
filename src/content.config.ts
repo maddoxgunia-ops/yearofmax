@@ -21,7 +21,7 @@ const projects = defineCollection({
     status: z.enum(['building', 'shipped', 'archived']),
     url: z.string().url().optional(),
     cover: z.string().optional(),
-    splash: z.string().optional(),
+    detail: z.string().optional(),
   }),
 });
 

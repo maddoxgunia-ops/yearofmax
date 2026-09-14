@@ -9,8 +9,8 @@ tags:
 draft: false
 status: shipped
 url: https://www.roblox.com/games/120175057573184/RUSH
-cover: /projects/rush/cover.webp
-splash: /projects/rush/splash.webp
+cover: /projects/rush/wordmark.webp
+detail: /projects/rush/gameplay.webp
 ---
 
 one roblox place hosting four kinds of server, decided from the first
