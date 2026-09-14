@@ -22,6 +22,7 @@
 
   --strip:36px;
   --rail:28px;
+  --moves:232px;
 
   --font:system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
   --mono:ui-monospace,'SF Mono','Cascadia Mono',Menlo,Consolas,monospace;
@@ -74,9 +75,21 @@ button{background:none;border:none;padding:0;cursor:pointer}
 .tab:hover{color:var(--muted)}
 .tab.on{color:var(--fg);box-shadow:inset 0 -1px 0 var(--fg)}
 
+.back{color:var(--muted);font-family:var(--mono);font-size:15px;line-height:1;
+  padding:0 4px 2px;text-decoration:none;transition:color 130ms;flex:none}
+.back:hover{color:var(--fg)}
+
+/* ============ static moves panel (left) ============ */
+.moves-panel{
+  position:fixed;top:var(--strip);bottom:var(--strip);left:0;width:var(--moves);z-index:20;
+  background:var(--bg);border-right:1px solid var(--line);
+  overflow-y:auto;padding:14px 14px 22px;
+}
+.moves-panel h3{margin:0 0 10px;font-size:12px;font-weight:400;color:var(--faint)}
+
 /* ============ centred stage ============ */
 .stage{
-  position:fixed;top:var(--strip);bottom:var(--strip);left:var(--rail);right:var(--rail);
+  position:fixed;top:var(--strip);bottom:var(--strip);left:var(--moves);right:var(--rail);
   display:grid;place-items:center;
 }
 .group{
@@ -99,7 +112,8 @@ button{background:none;border:none;padding:0;cursor:pointer}
 .clock.hidden{display:none}
 
 .board-wrap{position:relative;width:100%;aspect-ratio:1/1}
-.evalbar{position:absolute;left:-13px;top:0;bottom:0;width:3px;background:var(--line);border-radius:3px}
+.evalbar{display:none;position:absolute;left:-13px;top:0;bottom:0;width:3px;background:var(--line);border-radius:3px}
+.evalbar.show{display:block}
 .evalbar .white{position:absolute;left:0;right:0;bottom:0;height:50%;background:var(--fg);
   border-radius:3px;transition:height 360ms cubic-bezier(.2,.7,.3,1)}
 .evalbar .tag{position:absolute;right:8px;font-family:var(--mono);font-size:10px;
@@ -280,6 +294,7 @@ table.stand tr.me td{color:var(--fg)}
 
 @media(max-width:720px){
   .rail{display:none}
+  .moves-panel{display:none}
   .stage{left:0;right:0}
   .group{width:min(calc(100dvh - 190px), calc(100vw - 34px), 660px)}
   .drawer{width:100%}
@@ -292,6 +307,7 @@ table.stand tr.me td{color:var(--fg)}
 <body>
 
 <header class="strip top">
+  <a class="back" href="/" title="Back to yearofmax" aria-label="Back to yearofmax">&#8592;</a>
   <span class="brand">CHESS</span>
   <span class="sep hide-sm"></span>
   <span class="status" id="statusChip"></span>
@@ -299,17 +315,15 @@ table.stand tr.me td{color:var(--fg)}
   <span class="status hide-sm" id="tcChip"></span>
   <span class="sep hide-sm"></span>
   <nav class="tabs" id="tabs">
-    <button class="tab" data-pane="moves">Moves</button>
     <button class="tab" data-pane="play">Play</button>
-    <button class="tab" data-pane="analysis">Analysis</button>
-    <button class="tab" data-pane="openings">Openings</button>
     <button class="tab" data-pane="tournament">Tournament</button>
-    <button class="tab" data-pane="online">Online</button>
-    <button class="tab" data-pane="settings">Settings</button>
   </nav>
 </header>
 
-<aside class="rail l">&larr; &rarr; step through moves &nbsp;·&nbsp; F flip &nbsp;·&nbsp; H hint &nbsp;·&nbsp; Esc close</aside>
+<aside class="moves-panel">
+  <h3>Moves<button class="btn" id="drawerClose" style="display:none">Close</button></h3>
+  <div class="scoresheet" id="scoresheet"></div>
+</aside>
 <aside class="rail r"><span class="eco" id="ecoNow">&mdash;</span>&nbsp; <span id="openingNow">Starting position</span></aside>
 
 <main class="stage">
@@ -322,12 +336,12 @@ table.stand tr.me td{color:var(--fg)}
     </div>
 
     <div class="board-wrap">
-      <div class="evalbar">
+      <div class="evalbar" id="evalBar">
         <div class="white" id="evalWhite"></div>
         <span class="tag up" id="evalTagUp"></span>
         <span class="tag down" id="evalTagDown"></span>
       </div>
-      <div class="board" id="board" data-theme="mono">
+      <div class="board" id="board" data-theme="ink">
         <div class="pieces" id="pieces"></div>
         <svg class="arrows" id="arrows" viewBox="0 0 800 800" preserveAspectRatio="none"></svg>
       </div>
@@ -362,11 +376,6 @@ table.stand tr.me td{color:var(--fg)}
 </footer>
 
 <div class="drawer" id="drawer">
-
-  <div class="pane" data-pane="moves">
-    <h3>Moves <button class="btn" id="drawerClose">Close</button></h3>
-    <div class="scoresheet" id="scoresheet"></div>
-  </div>
 
   <div class="pane" data-pane="play">
     <h3>Play</h3>
@@ -506,10 +515,10 @@ table.stand tr.me td{color:var(--fg)}
     <div class="field">
       <label class="lbl">Board</label>
       <div class="chips" id="themeChips">
-        <button class="chip on" data-t="mono">Mono</button>
+        <button class="chip" data-t="mono">Mono</button>
         <button class="chip" data-t="slate">Slate</button>
         <button class="chip" data-t="olive">Olive</button>
-        <button class="chip" data-t="ink">Ink</button>
+        <button class="chip on" data-t="ink">Ink</button>
       </div>
     </div>
     <div class="field">
@@ -1574,7 +1583,7 @@ var S={
   tour:null,
   tourMatch:null,
   net:null,
-  settings:{theme:'mono',anim:180,coords:true,hints:true,sound:true,autoQ:false,confirm:true},
+  settings:{theme:'ink',anim:180,coords:true,hints:true,sound:true,autoQ:false,confirm:true},
   evals:[],
   drawOffered:false
 };
@@ -1842,6 +1851,7 @@ function finishGame(st,forced){
   el.overResult.textContent=res.replace('1/2-1/2','\u00bd\u2013\u00bd').replace('-','\u2013');
   el.overDetail.textContent=detail;
   el.overBanner.classList.remove('hidden');
+  showFinalEval(res);
   Sound.end();
   updateStatus(); renderClocks();
   if(S.tourMatch) reportTourResult(res);
@@ -2053,6 +2063,15 @@ function setEval(cp,mate){
   if(cp>=0||mate>0){ el.evalTagDown.textContent=label; el.evalTagUp.textContent=''; }
   else { el.evalTagUp.textContent=label; el.evalTagDown.textContent=''; }
 }
+function showFinalEval(res){
+  var pct = res==='1-0' ? 100 : (res==='0-1' ? 0 : 50);
+  el.evalWhite.style.height=pct+'%';
+  var label=res.replace('1/2-1/2','½–½').replace('-','–');
+  if(pct>=50){ el.evalTagDown.textContent=label; el.evalTagUp.textContent=''; }
+  else { el.evalTagUp.textContent=label; el.evalTagDown.textContent=''; }
+  var b=$('evalBar'); if(b) b.classList.add('show');
+}
+function hideFinalEval(){ var b=$('evalBar'); if(b) b.classList.remove('show'); }
 var liveToken=0;
 function requestLiveEval(){
   if(!S.live) return;
@@ -2295,6 +2314,7 @@ function resetTo(fen){
   S.clock.w=S.tc.base; S.clock.b=S.tc.base; S.clock.inc=S.tc.inc;
   S.clock.active=S.game.turn; S.clock.last=Date.now(); S.clock.running=false; S.clock.flagged=null;
   el.overBanner.classList.add('hidden');
+  hideFinalEval();
   el.accBoxes.style.display='none'; el.evalGraph.innerHTML='';
   setEval(0,null);
   el.anEval.textContent='\u2014'; el.anDepth.textContent='\u2014'; el.anNodes.textContent='\u2014';
@@ -2317,7 +2337,7 @@ function newGame(opts){
 }
 $('btnNewGame').onclick=function(){ newGame(); toast('New game'); };
 $('btnRematch').onclick=function(){
-  if(S.tour&&S.tourMatch){ el.overBanner.classList.add('hidden'); return; }
+  if(S.tour&&S.tourMatch){ el.overBanner.classList.add('hidden'); hideFinalEval(); return; }
   newGame();
 };
 $('btnFlip').onclick=function(){ S.flipped=!S.flipped; buildSquares(); renderPieces(); paintMarks(); updateStrips(); renderClocks(); drawArrows(null); };
