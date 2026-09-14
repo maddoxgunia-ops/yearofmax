@@ -174,7 +174,9 @@ const ticks = MONTHS.map((label, index) => ({
     ScrollTrigger.create({
       trigger: hero ?? document.documentElement,
       start: hero ? 'bottom top' : 'top top',
-      end: 'max',
+      // maxScroll + 1, not 'max': at a scroll position exactly equal to the end
+      // the trigger reads inactive, which would unpin on the final pixel.
+      end: () => ScrollTrigger.maxScroll(window) + 1,
       onToggle: (self) => {
         slot.style.height = self.isActive ? `${track.offsetHeight}px` : '';
         track.classList.toggle('is-pinned', self.isActive);
