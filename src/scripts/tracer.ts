@@ -19,10 +19,10 @@ interface Point {
 }
 
 /** How long a mark survives after it is laid down. */
-const FADE_MS = 620;
+const FADE_MS = 520;
 /** Stroke width bounds, in CSS pixels. */
-const WIDTH_MAX = 2.4;
-const WIDTH_MIN = 0.55;
+const WIDTH_MAX = 4;
+const WIDTH_MIN = 1.1;
 /** Above this speed (px/ms) the line is at its thinnest. */
 const SPEED_FALLOFF = 0.85;
 /** Cap on retained samples, so a fast sweep can't grow the buffer unbounded. */
