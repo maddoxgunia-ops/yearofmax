@@ -4,6 +4,7 @@
 ---
 
 <div class="globe" data-globe aria-hidden="true"></div>
+<span class="body-name label" data-body-name hidden></span>
 
 <style>
   .globe {
@@ -18,13 +19,24 @@
     width: 100%;
     height: 100%;
   }
+
+  .body-name {
+    position: fixed;
+    z-index: 3;
+    color: var(--ink);
+    pointer-events: none;
+    white-space: nowrap;
+    transform: translate(12px, -50%);
+    text-shadow: 0 0 10px rgb(0 0 0 / 0.9);
+  }
 </style>
 
 <script>
   import {
-    AdditiveBlending, BackSide, Group, Mesh, MeshBasicMaterial, PerspectiveCamera,
-    Scene, ShaderMaterial, SphereGeometry, SRGBColorSpace, TextureLoader,
-    Vector3, WebGLRenderer,
+    AdditiveBlending, BackSide, BufferGeometry, Float32BufferAttribute, Group,
+    Line, LineBasicMaterial, Matrix4, Mesh, MeshBasicMaterial, PerspectiveCamera,
+    Quaternion, Scene, ShaderMaterial, SphereGeometry, SRGBColorSpace, Vector2,
+    TextureLoader, Vector3, WebGLRenderer,
   } from 'three';
   import { Body, Equator, MakeTime, Observer, SiderealTime } from 'astronomy-engine';
 
@@ -47,6 +59,7 @@
     uniform sampler2D cloudMap;
     uniform sampler2D waterMap;
     uniform vec3 sunDir;
+    uniform float cloudShift;
     varying vec2 vUv;
     varying vec3 vNormal;
     varying vec3 vView;
@@ -60,7 +73,9 @@
 
       vec3 day = texture2D(dayMap, vUv).rgb;
       vec3 night = texture2D(nightMap, vUv).rgb;
-      float cloud = texture2D(cloudMap, vUv).r;
+      // Offset from the surface UV so the deck drifts over the ground
+      // rather than being painted onto it.
+      float cloud = texture2D(cloudMap, vec2(fract(vUv.x + cloudShift), vUv.y)).r;
       float water = texture2D(waterMap, vUv).r;
 
       vec3 halfway = normalize(s + vView);
@@ -91,6 +106,18 @@
       gl_FragColor = vec4(vec3(0.33, 0.6, 1.0), rim * lit * 0.95);
     }
   `;
+
+  /** How close the pointer must come to a planet, in px. */
+  const HIT_PX = 26;
+  /** Meteors on screen at once, and the gap between them in seconds. */
+  const METEORS = 3;
+  const METEOR_GAP: [number, number] = [2.5, 9];
+  const METEOR_LIFE = 1.1;
+
+  /** Roll of the ecliptic across the frame, radians. */
+  const ECLIPTIC_ROLL = 0.42;
+  /** Drift of the cloud deck, in texture widths per second. */
+  const CLOUD_DRIFT = 0.0022;
 
   /** Sky radius. Everything distant lives just inside it. */
   const SKY = 90;
@@ -126,6 +153,13 @@
   let earthPivot: Group | null = null;
   let sunDir: Vector3 | null = null;
   let sunMesh: Mesh | null = null;
+  let surfaceMat: ShaderMaterial | null = null;
+  let label: HTMLElement | null = null;
+  const pointer = new Vector2(-9999, -9999);
+  const projected = new Vector3();
+
+  interface Meteor { line: Line; from: Vector3; to: Vector3; at: number; next: number }
+  const meteors: Meteor[] = [];
   const planetMeshes = new Map<Body, Mesh>();
 
   let day = 1;
@@ -161,56 +195,28 @@
     return { ra: eq.ra, dec: eq.dec };
   }
 
-  /**
-   * Points the celestial sphere at the planets.
-   *
-   * Left alone, the camera stares at RA 18h and the planets are simply not in
-   * frame — they sit wherever the date puts them, which is almost never in a
-   * fifty-degree cone. So the whole sphere is turned until the average planet
-   * direction faces the camera. Positions relative to one another and to the
-   * stars are untouched; this only decides which way we are looking.
+/**
+   * Fixes the viewing angle on the ecliptic — the band every planet travels
+   * along. It does not follow anything, so planets drift in and out of frame
+   * on their own as the date moves, which is the point.
    */
-  function aim(when: Date): void {
+  function aim(): void {
     if (!sky) return;
 
-    // Anti-solar: the midnight sky. Looking this way puts the Sun behind the
-    // camera, which is the only way Earth's near face is lit — and it is also
-    // where an outer planet sits when it is at opposition.
-    const sun = equatorOf(Body.Sun, when);
-    const target = direction(sun.ra, sun.dec).negate();
+    const target = direction(0, 0); // vernal equinox
 
-    // Aim at whichever outer planet is best placed for the night sky — the
-    // one closest to that anti-solar point.
-    //
-    // Averaging the planets instead does not work: the mean of unit vectors
-    // spread across the sky points *between* them, at empty sky, which is why
-    // nothing was in frame. Picking a real body guarantees something is.
-    //
-    // Mercury and Venus are excluded — they never stray far from the Sun, so
-    // aiming at either swings the view round to Earth's night side.
-    let best: Vector3 | null = null;
-    let bestDot = -2;
-    for (const planet of PLANETS) {
-      if (planet.body === Body.Mercury || planet.body === Body.Venus) continue;
-      const eq = equatorOf(planet.body, when);
-      const dir = direction(eq.ra, eq.dec);
-      const score = dir.dot(target);
-      if (score > bestDot) { bestDot = score; best = dir; }
-    }
-    // Only half-weighted. Anti-solar stays dominant so the globe keeps a lit
-    // face year round; the planet pulls the view far enough to bring it into
-    // frame when it is reasonably placed, which is also when it would really
-    // be visible at night.
-    if (best) target.addScaledVector(best, 1.0);
+    // Up is the ecliptic pole, rolled a little so the plane crosses the
+    // frame diagonally rather than sitting flat across it.
+    const up = direction(18, 66.56).applyAxisAngle(target, ECLIPTIC_ROLL);
 
-    target.normalize();
-    sky.quaternion.setFromUnitVectors(target, new Vector3(0, 0, -1));
+    const basis = new Matrix4().lookAt(new Vector3(), target, up);
+    sky.quaternion.copy(new Quaternion().setFromRotationMatrix(basis).invert());
   }
 
   /** Sun direction, planet positions and the rotation the date starts from. */
   function orient(when: Date): void {
     if (!sunDir || !globe) return;
-    aim(when);
+    aim();
 
     // Taking the Sun's real declination is what puts the seasons in: it swings
     // +/-23.4 degrees across the year on its own. Tilting the globe instead
@@ -234,6 +240,111 @@
     baseSpin = (SiderealTime(MakeTime(when)) / 24) * Math.PI * 2;
   }
 
+  /**
+   * A planet's apparent track across the sky over the whole year, sampled from
+   * its real geocentric position. Not a tidy ellipse — seen from a moving
+   * Earth these curl back on themselves at opposition, which is retrograde
+   * motion and is exactly what should be there.
+   */
+  function pathOf(body: Body, colour: number): Line {
+    const year = new Date().getUTCFullYear();
+    const total = Math.round((Date.UTC(year + 1, 0, 1) - Date.UTC(year, 0, 1)) / 86_400_000);
+    const points: number[] = [];
+    for (let d = 1; d <= total; d += 3) {
+      const eq = equatorOf(body, dateOfDay(d));
+      const v = direction(eq.ra, eq.dec).multiplyScalar(PLANET_SHELL * 0.995);
+      points.push(v.x, v.y, v.z);
+    }
+    const geometry = new BufferGeometry();
+    geometry.setAttribute('position', new Float32BufferAttribute(points, 3));
+    return new Line(geometry, new LineBasicMaterial({
+      color: colour,
+      transparent: true,
+      opacity: 0.18,
+      depthWrite: false,
+    }));
+  }
+
+  /** Screen-space pick. Cheaper and far more forgiving than raycasting a
+   *  sphere a handful of pixels wide. */
+  function hover(): void {
+    if (!camera || !label || !scene) return;
+    if (pointer.x < 0) { label.hidden = true; return; }
+
+    scene.updateMatrixWorld();
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+
+    let bestName = '';
+    let bestX = 0;
+    let bestY = 0;
+    let bestDist = HIT_PX;
+
+    for (const [body, mesh] of planetMeshes) {
+      projected.setFromMatrixPosition(mesh.matrixWorld).project(camera);
+      if (projected.z > 1) continue; // behind the camera
+      const sx = (projected.x * 0.5 + 0.5) * w;
+      const sy = (-projected.y * 0.5 + 0.5) * h;
+      const dist = Math.hypot(sx - pointer.x, sy - pointer.y);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestName = String(body).toLowerCase();
+        bestX = sx;
+        bestY = sy;
+      }
+    }
+
+    if (!bestName) { label.hidden = true; return; }
+    label.textContent = bestName;
+    label.style.left = bestX + 'px';
+    label.style.top = bestY + 'px';
+    label.hidden = false;
+  }
+
+  /** Re-arms a meteor somewhere in frame, heading in a random direction. */
+  function armMeteor(m: Meteor): void {
+    if (!camera) return;
+    const nx = Math.random() * 1.7 - 0.85;
+    const ny = Math.random() * 1.2 - 0.3;
+    const angle = Math.random() * Math.PI * 2;
+    const reach = 0.35 + Math.random() * 0.5;
+
+    m.from.set(nx, ny, 0.5).unproject(camera);
+    m.to.set(nx + Math.cos(angle) * reach, ny + Math.sin(angle) * reach * 0.6, 0.5)
+      .unproject(camera);
+    m.at = 0;
+    m.next = METEOR_GAP[0] + Math.random() * (METEOR_GAP[1] - METEOR_GAP[0]);
+  }
+
+  function stepMeteors(delta: number): void {
+    for (const m of meteors) {
+      if (m.at < 0) {
+        m.next -= delta;
+        if (m.next > 0) continue;
+        armMeteor(m);
+      }
+
+      m.at += delta / METEOR_LIFE;
+      if (m.at >= 1) {
+        m.at = -1;
+        (m.line.material as LineBasicMaterial).opacity = 0;
+        continue;
+      }
+
+      const head = m.at;
+      const tail = Math.max(0, m.at - 0.16);
+      const pos = m.line.geometry.getAttribute('position');
+      const a = m.from.clone().lerp(m.to, tail);
+      const b = m.from.clone().lerp(m.to, head);
+      pos.setXYZ(0, a.x, a.y, a.z);
+      pos.setXYZ(1, b.x, b.y, b.z);
+      pos.needsUpdate = true;
+
+      // Bright as it enters, gone by the end of the streak.
+      (m.line.material as LineBasicMaterial).opacity = Math.sin(m.at * Math.PI) * 0.9;
+    }
+  }
+
   function size(): void {
     if (!renderer || !camera) return;
     const w = window.innerWidth;
@@ -254,6 +365,10 @@
     const elapsed = (performance.now() - startedAt) / 1000;
     const turns = (elapsed * SPIN_MINUTES_PER_SECOND) / (24 * 60);
     globe.rotation.y = baseSpin + turns * Math.PI * 2;
+    // Clouds run slightly ahead of the ground beneath them.
+    if (surfaceMat) surfaceMat.uniforms.cloudShift.value = elapsed * CLOUD_DRIFT;
+    stepMeteors(1 / 60);
+    hover();
     render();
   }
 
@@ -304,20 +419,24 @@
     sky.add(stars);
 
     // --- the globe ---------------------------------------------------------
-    const surface = new ShaderMaterial({
+    surfaceMat = new ShaderMaterial({
       uniforms: {
         dayMap: { value: load('day.webp', true) },
         nightMap: { value: load('night.webp', true) },
         cloudMap: { value: load('clouds.webp', false) },
         waterMap: { value: load('water.webp', false) },
         sunDir: { value: sunDir },
+        cloudShift: { value: 0 },
       },
       vertexShader: SURFACE_VERT,
       fragmentShader: SURFACE_FRAG,
     });
+    const surface = surfaceMat;
 
     earthPivot = new Group();
-    earthPivot.position.y = -1.15;
+    // Lower right, part of it out of frame. Keeps the bottom-left corner
+    // clear for the day readout and leaves the sky open for the paths.
+    earthPivot.position.set(0.95, -1.2, 0);
     scene.add(earthPivot);
 
     globe = new Mesh(new SphereGeometry(1, 96, 96), surface);
@@ -359,7 +478,33 @@
       );
       planetMeshes.set(planet.body, mesh);
       sky.add(mesh);
+      sky.add(pathOf(planet.body, planet.colour));
     }
+
+    // --- meteors -----------------------------------------------------------
+    for (let i = 0; i < METEORS; i++) {
+      const geometry = new BufferGeometry();
+      geometry.setAttribute('position', new Float32BufferAttribute([0, 0, 0, 0, 0, 0], 3));
+      const line = new Line(geometry, new LineBasicMaterial({
+        color: 0xffffff,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+      }));
+      // Never culled: the endpoints move every frame and the bounding sphere
+      // computed at construction would be wrong immediately.
+      line.frustumCulled = false;
+      scene.add(line);
+      meteors.push({
+        line,
+        from: new Vector3(),
+        to: new Vector3(),
+        at: -1,
+        next: Math.random() * METEOR_GAP[1],
+      });
+    }
+
+    label = document.querySelector<HTMLElement>('[data-body-name]');
 
     size();
     orient(dateOfDay(exact));
@@ -370,6 +515,18 @@
     wired = true;
 
     window.addEventListener('resize', () => { size(); render(); });
+
+    window.addEventListener('pointermove', (event) => {
+      if (event.pointerType !== 'mouse') return;
+      pointer.set(event.clientX, event.clientY);
+      // Under reduced motion there is no loop to pick this up, so do it here.
+      if (!frame) { hover(); render(); }
+    }, { passive: true });
+
+    window.addEventListener('pointerleave', () => {
+      pointer.set(-9999, -9999);
+      if (!frame) { hover(); render(); }
+    });
     document.addEventListener('timeline:day', (event) => {
       const detail = (event as CustomEvent<{ day: number; exact: number }>).detail;
       if (!detail) return;
