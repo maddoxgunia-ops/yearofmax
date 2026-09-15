@@ -2,6 +2,11 @@
 import Base from '../layouts/Base.astro';
 import Earth3D from '../components/Earth3D.astro';
 
+const MONTHS = [
+  'JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN',
+  'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC',
+] as const;
+
 const DAY_MS = 86_400_000;
 const now = new Date();
 const year = now.getUTCFullYear();
@@ -9,6 +14,7 @@ const yearStart = Date.UTC(year, 0, 1);
 const totalDays = Math.round((Date.UTC(year + 1, 0, 1) - yearStart) / DAY_MS);
 const today = Date.UTC(year, now.getUTCMonth(), now.getUTCDate());
 const dayOfYear = Math.round((today - yearStart) / DAY_MS) + 1;
+const month = MONTHS[now.getUTCMonth()];
 ---
 
 <Base title="yearofmax" description="" ground="night">
@@ -16,7 +22,8 @@ const dayOfYear = Math.round((today - yearStart) / DAY_MS) + 1;
 
   <h1 class="heading"></h1>
 
-  <p class="count label">
+  <p class="count">
+    <span data-month>{month}</span>
     <span data-counter>{dayOfYear}</span>/<span data-counter-total>{totalDays}</span>
   </p>
 </Base>
@@ -24,11 +31,16 @@ const dayOfYear = Math.round((today - yearStart) / DAY_MS) + 1;
 <style>
   .count {
     position: fixed;
-    left: var(--margin);
-    bottom: 1.5rem;
+    left: 1.75rem;
+    bottom: 1.4rem;
     z-index: 2;
+    display: flex;
+    gap: 0.75ch;
     color: var(--ink);
-    opacity: 0.75;
+    opacity: 0.8;
+    font-stretch: var(--wdth-narrow);
+    font-size: 15px;
+    letter-spacing: 0.08em;
     font-variant-numeric: tabular-nums;
   }
 </style>
@@ -36,14 +48,29 @@ const dayOfYear = Math.round((today - yearStart) / DAY_MS) + 1;
 <script>
   import { init } from '../scripts/timeScrub';
 
+  const MONTHS = [
+    'JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN',
+    'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC',
+  ];
+
   /** The scrubber owns the date; this only mirrors it into the readout. */
   function paint(event: Event): void {
     const detail = (event as CustomEvent<{ day: number; total: number }>).detail;
     if (!detail) return;
+
     const counter = document.querySelector<HTMLElement>('[data-counter]');
     const total = document.querySelector<HTMLElement>('[data-counter-total]');
+    const month = document.querySelector<HTMLElement>('[data-month]');
+
     if (counter) counter.textContent = String(detail.day);
     if (total) total.textContent = String(detail.total);
+
+    if (month) {
+      // Day-of-year back to a calendar month, so it tracks the scrub.
+      const year = new Date().getUTCFullYear();
+      const at = new Date(Date.UTC(year, 0, 1) + (detail.day - 1) * 86_400_000);
+      month.textContent = MONTHS[at.getUTCMonth()] ?? '';
+    }
   }
 
   document.addEventListener('timeline:day', paint);

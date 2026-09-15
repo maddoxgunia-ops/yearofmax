@@ -158,7 +158,21 @@
     [Body.Uranus]: 0.090,
     [Body.Neptune]: 0.085,
   };
-  const SUN_RADIUS = 0.12;
+  const SUN_RADIUS = 0.15;
+
+  /** Sidereal orbital periods, days. */
+  const PERIOD: Partial<Record<Body, number>> = {
+    [Body.Mercury]: 87.969,
+    [Body.Venus]: 224.701,
+    [Body.Earth]: 365.256,
+    [Body.Mars]: 686.980,
+    [Body.Jupiter]: 4332.589,
+    [Body.Saturn]: 10759.22,
+    [Body.Uranus]: 30685.4,
+    [Body.Neptune]: 60189.0,
+  };
+  /** Earth's drawn size, on the same footing as the other planets. */
+  const EARTH_SIZE_AT_5AU = 0.075;
 
   /** How far off Earth the camera floats, in AU. Earth's radius is 4.26e-5. */
   /**
@@ -170,8 +184,16 @@
    * the orbits into open ellipses.
    */
   const CAMERA_LIFT = 0.42;
-  /** Pull back along the Sun line, in AU. */
-  const CAMERA_BACK = 0.30;
+  /**
+   * Pull back along the Sun line, and step sideways off it, both in AU.
+   *
+   * Sitting directly behind Earth puts it 37 degrees off the Sun — outside the
+   * frame, and on the Sun line anyway, so it would eclipse it. Backing off and
+   * stepping aside closes that to 18 degrees and separates the two, at the
+   * cost of a smaller Sun.
+   */
+  const CAMERA_BACK = 0.80;
+  const CAMERA_SIDE = 0.40;
 
   /**
    * Earth is drawn as a foreground body a fixed distance from the camera
@@ -323,12 +345,14 @@
       // Offset sideways from Earth so the globe sits in frame rather than
       // filling it, then point the camera at the Sun.
       const outward = home.clone().normalize();
+      const side = new Vector3().crossVectors(outward, new Vector3(0, 1, 0)).normalize();
       cameraBase.copy(home)
         .addScaledVector(outward, CAMERA_BACK)
+        .addScaledVector(side, CAMERA_SIDE)
         .add(new Vector3(0, CAMERA_LIFT, 0));
       camera.position.copy(cameraBase);
       camera.lookAt(0, 0, 0);
-      placeEarth();
+      placeEarth(when);
       // Billboard the corona: the camera walks right round the Sun over a
       // year, so a fixed orientation shows the plane edge-on half the time.
       sunGlow?.lookAt(camera.position);
@@ -509,6 +533,33 @@
     return (SYSTEM_REACH / Math.pow(30, FALLOFF)) * Math.pow(au, FALLOFF);
   }
 
+  /**
+   * One full revolution of a body, sampled from the ephemeris.
+   *
+   * A flat circle at the body's current distance cannot touch it: every orbit
+   * is inclined to the ecliptic and none is a perfect circle, so the ring
+   * passed above or below the planet it was supposed to belong to. Walking the
+   * real orbit puts the line through the body by construction.
+   */
+  function orbitLine(body: Body, colour: number, opacity: number): Line {
+    const period = PERIOD[body] ?? 365;
+    const from = dateOfDay(exact).getTime();
+    const points: number[] = [];
+    for (let i = 0; i <= 192; i++) {
+      const at = new Date(from + (i / 192) * period * 86_400_000);
+      const v = helioOf3(body, at);
+      points.push(v.x, v.y, v.z);
+    }
+    const geometry = new BufferGeometry();
+    geometry.setAttribute('position', new Float32BufferAttribute(points, 3));
+    return new Line(geometry, new LineBasicMaterial({
+      color: colour,
+      transparent: true,
+      opacity,
+      depthWrite: false,
+    }));
+  }
+
   /** Screen-space pick. Cheaper and far more forgiving than raycasting a
    *  sphere a handful of pixels wide. */
   function hover(): void {
@@ -592,24 +643,22 @@
   }
 
   /**
-   * Hangs the globe off the camera: forward a fixed distance, out to one side
-   * and raised. Far nearer than anything else in the scene, so it occludes
-   * correctly.
+   * Earth sits on its own orbit like every other body, at its true position.
+   * Only its drawn size is exaggerated, by the same square-root rule the
+   * planets use — at half an AU the real thing is six hundredths of a pixel.
    */
-  function placeEarth(): void {
+  function placeEarth(when: Date): void {
     if (!camera || !earthPivot || !sunDir) return;
 
-    const forward = new Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
-    const right = new Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
-    const up = new Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
+    const home = helioOf3(Body.Earth, when);
+    earthPivot.position.copy(home);
 
-    earthPivot.position.copy(camera.position)
-      .addScaledVector(forward, EARTH_AT)
-      .addScaledVector(right, EARTH_AT * EARTH_SIDE)
-      .addScaledVector(up, EARTH_AT * EARTH_RISE);
+    const dist = home.distanceTo(camera.position);
+    const radius = EARTH_SIZE_AT_5AU * Math.sqrt(Math.max(dist, 0.05) / 5);
+    earthPivot.scale.setScalar(radius / EARTH_RADIUS);
 
-    // Lit from wherever the Sun actually is relative to where it now sits.
-    sunDir.copy(earthPivot.position).negate().normalize();
+    // Lit from the Sun, which is at the origin.
+    sunDir.copy(home).negate().normalize();
   }
 
   function size(): void {
@@ -645,7 +694,7 @@
       camera.position.y += Math.cos(elapsed * 0.13) * wander * 0.7;
       camera.lookAt(0, 0, 0);
       camera.rotateZ(Math.sin(elapsed * 0.07) * 0.004);
-      placeEarth();
+      placeEarth(dateOfDay(exact));
       sunGlow?.lookAt(camera.position);
       if (sky) sky.position.copy(camera.position);
     }
@@ -801,41 +850,12 @@
         mesh.add(ring);
       }
 
-      // Orbit as a line, a true circle at the planet's real distance.
-      const here = helioOf3(planet.body, dateOfDay(exact));
-      const r = Math.hypot(here.x, here.z);
-      const points: number[] = [];
-      for (let i = 0; i <= 256; i++) {
-        const a = (i / 256) * Math.PI * 2;
-        points.push(Math.cos(a) * r, 0, Math.sin(a) * r);
-      }
-      const geometry = new BufferGeometry();
-      geometry.setAttribute('position', new Float32BufferAttribute(points, 3));
-      systemSpin.add(new Line(geometry, new LineBasicMaterial({
-        color: 0x8fa4c4,
-        transparent: true,
-        opacity: 0.16,
-        depthWrite: false,
-      })));
+      systemSpin.add(orbitLine(planet.body, 0x8fa4c4, 0.20));
     }
 
     // Earth's own orbit, drawn brighter: it is the line everything else is
     // outside of, and the reason the outer planets sit where they do.
-    {
-      const points: number[] = [];
-      for (let i = 0; i <= 256; i++) {
-        const a = (i / 256) * Math.PI * 2;
-        points.push(Math.cos(a), 0, Math.sin(a));
-      }
-      const geometry = new BufferGeometry();
-      geometry.setAttribute('position', new Float32BufferAttribute(points, 3));
-      systemSpin.add(new Line(geometry, new LineBasicMaterial({
-        color: 0x9ec4ff,
-        transparent: true,
-        opacity: 0.34,
-        depthWrite: false,
-      })));
-    }
+    systemSpin.add(orbitLine(Body.Earth, 0x9ec4ff, 0.40));
 
     // --- the main belt -----------------------------------------------------
     // Between Mars and Jupiter, where it actually is. Scattered rather than a
