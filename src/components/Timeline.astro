@@ -158,10 +158,12 @@ const months = MONTHS.map((label, index) => ({
 
     const draw = (): void => {
       track.style.transform = 'translate3d(' + -offset + 'px,0,0)';
-      if (!counter) return;
       // Whichever day sits at the centre of the viewport is the one shown.
-      const centre = Math.round((offset + half() - day / 2) / day) + 1;
-      counter.textContent = String(Math.min(total, Math.max(1, centre)));
+      const centre = Math.min(total, Math.max(1, Math.round((offset + half() - day / 2) / day) + 1));
+      if (counter) counter.textContent = String(centre);
+
+      // The sky listens for this and redraws for that date.
+      document.dispatchEvent(new CustomEvent('timeline:day', { detail: { day: centre, total } }));
     };
 
     const pan = (delta: number): void => {

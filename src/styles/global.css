@@ -49,6 +49,15 @@
   --hairline: 1px;
 }
 
+/* Night ground. Only the tokens change — every component reads them, so the
+   whole interface inverts without a single component knowing about it. */
+[data-ground='night'] {
+  --paper: #0A0C10;
+  --ink: #F2F5F8;
+  --graphite: #79818C;
+  --rule: #232830;
+}
+
 /* ===========================================================================
    Base
    =========================================================================== */
@@ -168,7 +177,8 @@ h1, h2, h3,
 
 /* Pointer tracer canvas (see src/scripts/motion.ts -> tracer.ts). Never
    interactive; only created when motion is permitted. */
-.tracer {
+.tracer,
+.star-cursor {
   position: fixed;
   inset: 0;
   z-index: 60;

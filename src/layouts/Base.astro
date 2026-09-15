@@ -7,16 +7,18 @@ interface Props {
   title?: string;
   description?: string;
   ogImage?: string;
+  /** "night" flips the palette tokens and swaps the pencil cursor for the star. */
+  ground?: 'paper' | 'night';
 }
 
-const { title, description, ogImage } = Astro.props;
+const { title, description, ogImage, ground = 'paper' } = Astro.props;
 
 const canonical = new URL(Astro.url.pathname, Astro.site).href;
 const ogImageUrl = new URL(ogImage ?? '/og.png', Astro.site).href;
 ---
 
 <!doctype html>
-<html lang="en">
+<html lang="en" data-ground={ground}>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -63,14 +65,19 @@ const ogImageUrl = new URL(ogImage ?? '/og.png', Astro.site).href;
     <script>
       import { init } from '../scripts/motion';
       import { init as initTracer } from '../scripts/tracer';
+      import { init as initStarCursor } from '../scripts/starCursor';
 
       // astro:page-load, not DOMContentLoaded: this fires on first paint AND
       // after every ClientRouter navigation. init() is idempotent.
       document.addEventListener('astro:page-load', init);
 
-      // motion:ready rather than astro:page-load, so the tracer inherits the
-      // reduced-motion bail: no event, no canvas.
-      document.addEventListener('motion:ready', initTracer);
+      // motion:ready rather than astro:page-load, so both cursors inherit the
+      // reduced-motion bail: no event, no canvas. One or the other runs,
+      // decided by the ground.
+      document.addEventListener('motion:ready', () => {
+        if (document.documentElement.dataset.ground === 'night') initStarCursor();
+        else initTracer();
+      });
     </script>
 
     <style>

@@ -1,0 +1,145 @@
+---
+// Canvas is drawn entirely on the client — positions depend on the date the
+// timeline is parked on, which only exists at runtime.
+---
+
+<canvas class="sky" data-sky aria-hidden="true"></canvas>
+
+<style>
+  .sky {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    z-index: -1;
+    pointer-events: none;
+    display: block;
+  }
+</style>
+
+<script>
+  import { Body, Equator, Observer, MakeTime } from 'astronomy-engine';
+  import { STARS } from '../lib/stars';
+
+  /** Geocentric J2000, to match the star catalogue's frame. */
+  const GEOCENTRIC = new Observer(0, 0, 0);
+
+  const PLANETS = [
+    { body: Body.Moon, size: 4.2, tint: '#FFFFFF' },
+    { body: Body.Venus, size: 3.4, tint: '#FFF6E0' },
+    { body: Body.Jupiter, size: 3.0, tint: '#FFEFD2' },
+    { body: Body.Mars, size: 2.4, tint: '#FFD2C4' },
+    { body: Body.Saturn, size: 2.4, tint: '#FFF3D6' },
+    { body: Body.Mercury, size: 1.8, tint: '#F0F0F0' },
+    { body: Body.Uranus, size: 1.4, tint: '#DCF2F4' },
+    { body: Body.Neptune, size: 1.4, tint: '#D6E2FF' },
+  ];
+
+  let canvas: HTMLCanvasElement | null = null;
+  let ctx: CanvasRenderingContext2D | null = null;
+  let day = 1;
+  let wired = false;
+
+  function dateOfDay(d: number): Date {
+    const year = new Date().getUTCFullYear();
+    return new Date(Date.UTC(year, 0, 1) + (d - 1) * 86_400_000 + 86_400_000 / 2);
+  }
+
+  function raOf(body: Body, when: Date): { ra: number; dec: number } {
+    const eq = Equator(body, MakeTime(when), GEOCENTRIC, false, true);
+    return { ra: eq.ra, dec: eq.dec };
+  }
+
+  function resize(): void {
+    if (!canvas || !ctx) return;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.round(window.innerWidth * dpr);
+    canvas.height = Math.round(window.innerHeight * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  /** Bloom, then a hard core. Additive so overlapping light accumulates. */
+  function spark(c: CanvasRenderingContext2D, x: number, y: number, r: number, tint: string): void {
+    const halo = c.createRadialGradient(x, y, 0, x, y, r * 9);
+    halo.addColorStop(0, 'rgba(255,255,255,0.55)');
+    halo.addColorStop(0.18, 'rgba(255,255,255,0.14)');
+    halo.addColorStop(1, 'rgba(255,255,255,0)');
+    c.fillStyle = halo;
+    c.beginPath();
+    c.arc(x, y, r * 9, 0, Math.PI * 2);
+    c.fill();
+
+    c.fillStyle = tint;
+    c.beginPath();
+    c.arc(x, y, r, 0, Math.PI * 2);
+    c.fill();
+  }
+
+  function draw(): void {
+    if (!ctx || !canvas) return;
+
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    ctx.clearRect(0, 0, w, h);
+
+    const when = dateOfDay(day);
+    // At local midnight the meridian sits opposite the Sun, so the sky on a
+    // given date is centred twelve hours of right ascension away from it.
+    const sun = raOf(Body.Sun, when);
+    const centre = (sun.ra + 12) % 24;
+
+    // Two hours of RA per tenth of the screen keeps the sky legible rather
+    // than cramming all 24 hours into one viewport.
+    const HOURS_ACROSS = 10;
+    const pxPerHour = w / HOURS_ACROSS;
+
+    const project = (ra: number, dec: number): [number, number] => {
+      let delta = ra - centre;
+      while (delta > 12) delta -= 24;
+      while (delta < -12) delta += 24;
+      return [w / 2 + delta * pxPerHour, (0.5 - dec / 180) * h];
+    };
+
+    ctx.globalCompositeOperation = 'lighter';
+
+    for (const star of STARS) {
+      const [x, y] = project(star.ra, star.dec);
+      if (x < -80 || x > w + 80) continue;
+      const r = Math.max(0.7, 2.7 - star.mag * 0.55);
+      spark(ctx, x, y, r, '#FFFFFF');
+    }
+
+    for (const planet of PLANETS) {
+      const { ra, dec } = raOf(planet.body, when);
+      const [x, y] = project(ra, dec);
+      if (x < -80 || x > w + 80) continue;
+      spark(ctx, x, y, planet.size, planet.tint);
+    }
+
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  function setup(): void {
+    canvas = document.querySelector<HTMLCanvasElement>('[data-sky]');
+    if (!canvas) return;
+    ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    resize();
+    draw();
+
+    if (wired) return;
+    wired = true;
+
+    window.addEventListener('resize', () => { resize(); draw(); });
+    // The timeline owns the date; the sky follows it.
+    document.addEventListener('timeline:day', (event) => {
+      const next = (event as CustomEvent<{ day: number }>).detail?.day;
+      if (typeof next !== 'number' || next === day) return;
+      day = next;
+      draw();
+    });
+  }
+
+  document.addEventListener('astro:page-load', setup);
+</script>

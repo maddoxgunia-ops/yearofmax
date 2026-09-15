@@ -1,6 +1,7 @@
 ---
 import Base from '../layouts/Base.astro';
 import Timeline from '../components/Timeline.astro';
+import Sky from '../components/Sky.astro';
 
 const DAY_MS = 86_400_000;
 const now = new Date();
@@ -11,7 +12,8 @@ const today = Date.UTC(year, now.getUTCMonth(), now.getUTCDate());
 const dayOfYear = Math.round((today - yearStart) / DAY_MS) + 1;
 ---
 
-<Base title="yearofmax" description="">
+<Base title="yearofmax" description="" ground="night">
+  <Sky />
   <Timeline />
 
   <section class="hero">
