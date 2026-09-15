@@ -3,10 +3,15 @@
  *
  *   node scripts/earth-textures.mjs   (or: npm run earth)
  *
- * Source: the three.js repository's planet textures, which are derived from
- * NASA's Blue Marble and Black Marble imagery and are public domain. The
- * committed files under public/earth/ are the output; the originals are not
- * kept in the repo.
+ * Sources, both public domain:
+ *   - Surface set: the three.js repository's planet textures, derived from
+ *     NASA's Blue Marble and Black Marble imagery.
+ *   - Star map: NASA SVS "Deep Star Maps" (svs.gsfc.nasa.gov/3895), plotted
+ *     from the Hipparcos, Tycho-2 and Gaia catalogues, in celestial
+ *     (RA/Dec) coordinates so it wraps the sky the right way round.
+ *
+ * The committed files under public/earth/ are the output; the originals are
+ * not kept in the repo.
  */
 import { mkdir, writeFile } from 'node:fs/promises';
 import sharp from 'sharp';
@@ -27,14 +32,23 @@ const TEXTURES = [
   { src: 'earth_specular_2048.jpg', out: 'water.webp', width: 1024, quality: 68 },
   // Terrain relief.
   { src: 'earth_normal_2048.jpg', out: 'normal.webp', width: 2048, quality: 78 },
+  // The sky. Half the source resolution: most of it sits behind the globe or
+  // the interface, and 4096 costs 787 KB against 177 KB for 2048.
+  {
+    url: 'https://svs.gsfc.nasa.gov/vis/a000000/a003800/a003895/starmap_4k.jpg',
+    out: 'starmap.webp',
+    width: 2048,
+    quality: 76,
+  },
 ];
 
 await mkdir(OUT, { recursive: true });
 
 let total = 0;
 for (const texture of TEXTURES) {
-  const response = await fetch(`${BASE}/${texture.src}`);
-  if (!response.ok) throw new Error(`${texture.src}: HTTP ${response.status}`);
+  const from = texture.url ?? `${BASE}/${texture.src}`;
+  const response = await fetch(from);
+  if (!response.ok) throw new Error(`${texture.out}: HTTP ${response.status}`);
   const raw = Buffer.from(await response.arrayBuffer());
 
   let pipeline = sharp(raw).resize({ width: texture.width, withoutEnlargement: true });

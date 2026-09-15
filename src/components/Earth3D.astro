@@ -1,6 +1,6 @@
 ---
-// WebGL globe. Everything renders on the client: the sun angle and the
-// rotation both depend on the date the timeline is parked on.
+// WebGL globe, sky and planets. Everything renders on the client: sun angle,
+// rotation and planet positions all depend on the date the timeline is on.
 ---
 
 <div class="globe" data-globe aria-hidden="true"></div>
@@ -22,11 +22,11 @@
 
 <script>
   import {
-    Mesh, PerspectiveCamera, Scene, ShaderMaterial, SphereGeometry,
-    SRGBColorSpace, TextureLoader, Vector3, WebGLRenderer, AdditiveBlending,
-    BackSide, RepeatWrapping,
+    AdditiveBlending, BackSide, Group, Mesh, MeshBasicMaterial, PerspectiveCamera,
+    Scene, ShaderMaterial, SphereGeometry, SRGBColorSpace, TextureLoader,
+    Vector3, WebGLRenderer,
   } from 'three';
-  import { Body, HelioVector, Ecliptic, MakeTime, SiderealTime } from 'astronomy-engine';
+  import { Body, Equator, MakeTime, Observer, SiderealTime } from 'astronomy-engine';
 
   const SURFACE_VERT = `
     varying vec2 vUv;
@@ -34,10 +34,10 @@
     varying vec3 vView;
     void main() {
       vUv = uv;
-      vNormal = normalize(normalMatrix * normal);
-      vec4 mv = modelViewMatrix * vec4(position, 1.0);
-      vView = normalize(-mv.xyz);
-      gl_Position = projectionMatrix * mv;
+      vNormal = normalize(mat3(modelMatrix) * normal);
+      vec4 world = modelMatrix * vec4(position, 1.0);
+      vView = normalize(cameraPosition - world.xyz);
+      gl_Position = projectionMatrix * viewMatrix * world;
     }
   `;
 
@@ -56,28 +56,23 @@
       vec3 s = normalize(sunDir);
 
       // Soft terminator. A hard step reads as a paper cut-out.
-      float lambert = dot(n, s);
-      float lit = smoothstep(-0.14, 0.26, lambert);
+      float lit = smoothstep(-0.14, 0.26, dot(n, s));
 
       vec3 day = texture2D(dayMap, vUv).rgb;
       vec3 night = texture2D(nightMap, vUv).rgb;
       float cloud = texture2D(cloudMap, vUv).r;
       float water = texture2D(waterMap, vUv).r;
 
-      // Sun glinting off oceans only.
       vec3 halfway = normalize(s + vView);
       float glint = pow(max(dot(n, halfway), 0.0), 48.0) * water * lit;
 
-      // A little ambient so the night side is not pure black.
       vec3 colour = mix(day * 0.045, day, lit);
       colour += night * (1.0 - lit) * 1.5;
       colour += vec3(1.0, 0.94, 0.82) * glint * 0.55;
 
-      // Cloud deck: white in daylight, barely there at night.
       vec3 cloudColour = mix(vec3(0.015, 0.02, 0.03), vec3(1.0), lit);
       colour = mix(colour, cloudColour, clamp(cloud * 1.15, 0.0, 0.92));
 
-      // Forward-scattered light hugging the lit limb.
       float rim = pow(1.0 - max(dot(n, vView), 0.0), 3.2);
       colour += vec3(0.28, 0.52, 1.0) * rim * lit * 0.55;
 
@@ -85,47 +80,158 @@
     }
   `;
 
-  const AIR_VERT = SURFACE_VERT;
-
   const AIR_FRAG = `
     uniform vec3 sunDir;
     varying vec3 vNormal;
     varying vec3 vView;
     void main() {
       vec3 n = normalize(vNormal);
-      // Backside shell, so the fresnel is strongest where we graze the limb.
       float rim = pow(1.0 - abs(dot(n, vView)), 3.4);
       float lit = smoothstep(-0.45, 0.55, dot(n, normalize(sunDir)));
       gl_FragColor = vec4(vec3(0.33, 0.6, 1.0), rim * lit * 0.95);
     }
   `;
 
+  /** Sky radius. Everything distant lives just inside it. */
+  const SKY = 90;
+  const PLANET_SHELL = 70;
+
+  /**
+   * Artistic speed-up for the idle spin: one real second is this many minutes
+   * of Earth rotation. Purely a looks decision — the date still sets where the
+   * rotation starts from.
+   */
+  const SPIN_MINUTES_PER_SECOND = 7;
+
+  const PLANETS: Array<{ body: Body; size: number; colour: number }> = [
+    { body: Body.Venus, size: 0.63, colour: 0xfff0cc },
+    { body: Body.Jupiter, size: 0.57, colour: 0xffe9c4 },
+    { body: Body.Mars, size: 0.45, colour: 0xff9a6a },
+    { body: Body.Mercury, size: 0.36, colour: 0xe8e4dc },
+    { body: Body.Saturn, size: 0.42, colour: 0xffeec2 },
+    { body: Body.Uranus, size: 0.27, colour: 0xc8f0f4 },
+    { body: Body.Neptune, size: 0.26, colour: 0xaec4ff },
+  ];
+
+  /** Geocentric, for RA/Dec that matches the star map's frame. */
+  const GEO = new Observer(0, 0, 0);
+
   let renderer: WebGLRenderer | null = null;
   let scene: Scene | null = null;
   let camera: PerspectiveCamera | null = null;
   let globe: Mesh | null = null;
+  /** Everything fixed to the celestial sphere: stars, Sun, planets. */
+  let sky: Group | null = null;
+  /** Carries the same rotation, so Earth’s axis stays on the celestial pole. */
+  let earthPivot: Group | null = null;
   let sunDir: Vector3 | null = null;
+  let sunMesh: Mesh | null = null;
+  const planetMeshes = new Map<Body, Mesh>();
+
   let day = 1;
+  let exact = 1;
+  let frame = 0;
+  let baseSpin = 0;
+  let startedAt = 0;
   let wired = false;
 
+  /** Fractional day of year to a real instant, time-of-day included. */
   function dateOfDay(d: number): Date {
     const year = new Date().getUTCFullYear();
-    return new Date(Date.UTC(year, 0, 1) + (d - 1) * 86_400_000 + 86_400_000 / 2);
+    return new Date(Date.UTC(year, 0, 1) + (d - 1) * 86_400_000);
   }
 
-  /** Real sun direction and rotation for a date. */
+  /**
+   * RA (hours) and Dec (degrees) to a direction, matching how SphereGeometry
+   * lays out its UVs — so the star map, the planets and the Sun all share one
+   * frame and line up with each other.
+   */
+  function direction(ra: number, dec: number): Vector3 {
+    const phi = (ra / 24) * Math.PI * 2;
+    const theta = ((90 - dec) * Math.PI) / 180;
+    return new Vector3(
+      -Math.cos(phi) * Math.sin(theta),
+      Math.cos(theta),
+      Math.sin(phi) * Math.sin(theta),
+    );
+  }
+
+  function equatorOf(body: Body, when: Date): { ra: number; dec: number } {
+    const eq = Equator(body, MakeTime(when), GEO, false, true);
+    return { ra: eq.ra, dec: eq.dec };
+  }
+
+  /**
+   * Points the celestial sphere at the planets.
+   *
+   * Left alone, the camera stares at RA 18h and the planets are simply not in
+   * frame — they sit wherever the date puts them, which is almost never in a
+   * fifty-degree cone. So the whole sphere is turned until the average planet
+   * direction faces the camera. Positions relative to one another and to the
+   * stars are untouched; this only decides which way we are looking.
+   */
+  function aim(when: Date): void {
+    if (!sky) return;
+
+    // Anti-solar: the midnight sky. Looking this way puts the Sun behind the
+    // camera, which is the only way Earth's near face is lit — and it is also
+    // where an outer planet sits when it is at opposition.
+    const sun = equatorOf(Body.Sun, when);
+    const target = direction(sun.ra, sun.dec).negate();
+
+    // Aim at whichever outer planet is best placed for the night sky — the
+    // one closest to that anti-solar point.
+    //
+    // Averaging the planets instead does not work: the mean of unit vectors
+    // spread across the sky points *between* them, at empty sky, which is why
+    // nothing was in frame. Picking a real body guarantees something is.
+    //
+    // Mercury and Venus are excluded — they never stray far from the Sun, so
+    // aiming at either swings the view round to Earth's night side.
+    let best: Vector3 | null = null;
+    let bestDot = -2;
+    for (const planet of PLANETS) {
+      if (planet.body === Body.Mercury || planet.body === Body.Venus) continue;
+      const eq = equatorOf(planet.body, when);
+      const dir = direction(eq.ra, eq.dec);
+      const score = dir.dot(target);
+      if (score > bestDot) { bestDot = score; best = dir; }
+    }
+    // Only half-weighted. Anti-solar stays dominant so the globe keeps a lit
+    // face year round; the planet pulls the view far enough to bring it into
+    // frame when it is reasonably placed, which is also when it would really
+    // be visible at night.
+    if (best) target.addScaledVector(best, 1.0);
+
+    target.normalize();
+    sky.quaternion.setFromUnitVectors(target, new Vector3(0, 0, -1));
+  }
+
+  /** Sun direction, planet positions and the rotation the date starts from. */
   function orient(when: Date): void {
     if (!sunDir || !globe) return;
+    aim(when);
 
-    // Earth's heliocentric longitude points away from the Sun.
-    const e = Ecliptic(HelioVector(Body.Earth, MakeTime(when)));
-    const lon = Math.atan2(e.vec.y, e.vec.x) + Math.PI;
-    // Tilted slightly so the terminator is never a dead-vertical line.
-    sunDir.set(Math.cos(lon), 0.28, Math.sin(lon)).normalize();
+    // Taking the Sun's real declination is what puts the seasons in: it swings
+    // +/-23.4 degrees across the year on its own. Tilting the globe instead
+    // would have thrown it out of line with the celestial pole.
+    const sun = equatorOf(Body.Sun, when);
+    const sunLocal = direction(sun.ra, sun.dec);
+    // The Sun mesh is a child of the sky group, so it takes the group's
+    // rotation for free. The shader's sunDir is in world space and does not.
+    sunMesh?.position.copy(sunLocal).multiplyScalar(PLANET_SHELL);
+    sunDir.copy(sunLocal);
+    if (sky) sunDir.applyQuaternion(sky.quaternion);
+    if (sky && earthPivot) earthPivot.quaternion.copy(sky.quaternion);
 
-    // Greenwich sidereal time sets which meridian faces us.
-    const gst = SiderealTime(MakeTime(when));
-    globe.rotation.y = (gst / 24) * Math.PI * 2;
+    for (const planet of PLANETS) {
+      const mesh = planetMeshes.get(planet.body);
+      if (!mesh) continue;
+      const eq = equatorOf(planet.body, when);
+      mesh.position.copy(direction(eq.ra, eq.dec)).multiplyScalar(PLANET_SHELL);
+    }
+
+    baseSpin = (SiderealTime(MakeTime(when)) / 24) * Math.PI * 2;
   }
 
   function size(): void {
@@ -142,16 +248,24 @@
     if (renderer && scene && camera) renderer.render(scene, camera);
   }
 
+  function tick(): void {
+    frame = requestAnimationFrame(tick);
+    if (!globe) return;
+    const elapsed = (performance.now() - startedAt) / 1000;
+    const turns = (elapsed * SPIN_MINUTES_PER_SECOND) / (24 * 60);
+    globe.rotation.y = baseSpin + turns * Math.PI * 2;
+    render();
+  }
+
   function setup(): void {
     const host = document.querySelector<HTMLElement>('[data-globe]');
     if (!host || host.dataset.wired === 'yes') return;
 
-    // WebGL can be unavailable or blocked; leave the page alone if so.
     let gl: WebGLRenderer;
     try {
       gl = new WebGLRenderer({ alpha: true, antialias: true, powerPreference: 'low-power' });
     } catch {
-      return;
+      return; // No WebGL: leave the page as it is.
     }
     host.dataset.wired = 'yes';
 
@@ -160,19 +274,36 @@
     host.appendChild(renderer.domElement);
 
     scene = new Scene();
-    camera = new PerspectiveCamera(38, 1, 0.1, 100);
+    camera = new PerspectiveCamera(46, 1, 0.1, 400);
     camera.position.set(0, 0, 2.5);
 
-    sunDir = new Vector3(1, 0.28, 0.4).normalize();
+    sunDir = new Vector3(1, 0, 0);
 
     const loader = new TextureLoader();
     const load = (file: string, srgb: boolean) => {
       const t = loader.load(`/earth/${file}`, render);
       if (srgb) t.colorSpace = SRGBColorSpace;
-      t.wrapS = RepeatWrapping;
       return t;
     };
 
+    // --- sky -------------------------------------------------------------
+    sky = new Group();
+    scene.add(sky);
+
+    const stars = new Mesh(
+      new SphereGeometry(SKY, 64, 32),
+      // Knocked well back: at full strength the map's diffuse galactic light
+      // greys the whole frame and the globe stops being the subject.
+      new MeshBasicMaterial({
+        map: load('starmap.webp', true),
+        color: 0x5a6270,
+        side: BackSide,
+        depthWrite: false,
+      }),
+    );
+    sky.add(stars);
+
+    // --- the globe ---------------------------------------------------------
     const surface = new ShaderMaterial({
       uniforms: {
         dayMap: { value: load('day.webp', true) },
@@ -185,17 +316,20 @@
       fragmentShader: SURFACE_FRAG,
     });
 
+    earthPivot = new Group();
+    earthPivot.position.y = -1.15;
+    scene.add(earthPivot);
+
     globe = new Mesh(new SphereGeometry(1, 96, 96), surface);
-    // Axial tilt, and pushed down so the limb crosses the upper third.
-    globe.rotation.z = (-23.44 * Math.PI) / 180;
-    globe.position.y = -1.15;
-    scene.add(globe);
+    // No axial tilt here: the spin axis IS the celestial pole. The pivot
+    // carries the sky's rotation so the two stay aligned.
+    earthPivot.add(globe);
 
     const air = new Mesh(
       new SphereGeometry(1.035, 64, 64),
       new ShaderMaterial({
         uniforms: { sunDir: { value: sunDir } },
-        vertexShader: AIR_VERT,
+        vertexShader: SURFACE_VERT,
         fragmentShader: AIR_FRAG,
         blending: AdditiveBlending,
         side: BackSide,
@@ -203,11 +337,33 @@
         depthWrite: false,
       }),
     );
-    air.position.y = globe.position.y;
-    scene.add(air);
+    earthPivot.add(air);
+
+    // --- sun and planets ---------------------------------------------------
+    sunMesh = new Mesh(
+      new SphereGeometry(1.7, 32, 32),
+      new MeshBasicMaterial({ color: 0xfff6e0 }),
+    );
+    sky.add(sunMesh);
+
+    const corona = new Mesh(
+      new SphereGeometry(5.5, 32, 32),
+      new MeshBasicMaterial({ color: 0xffca70, transparent: true, opacity: 0.20, blending: AdditiveBlending, depthWrite: false }),
+    );
+    sunMesh.add(corona);
+
+    for (const planet of PLANETS) {
+      const mesh = new Mesh(
+        new SphereGeometry(planet.size, 16, 16),
+        new MeshBasicMaterial({ color: planet.colour }),
+      );
+      planetMeshes.set(planet.body, mesh);
+      sky.add(mesh);
+    }
 
     size();
-    orient(dateOfDay(day));
+    orient(dateOfDay(exact));
+    globe.rotation.y = baseSpin;
     render();
 
     if (wired) return;
@@ -215,12 +371,21 @@
 
     window.addEventListener('resize', () => { size(); render(); });
     document.addEventListener('timeline:day', (event) => {
-      const next = (event as CustomEvent<{ day: number }>).detail?.day;
-      if (typeof next !== 'number' || next === day) return;
-      day = next;
-      orient(dateOfDay(day));
-      render();
+      const detail = (event as CustomEvent<{ day: number; exact: number }>).detail;
+      if (!detail) return;
+      day = detail.day;
+      // One day of scrub is one whole rotation, so this has to follow the
+      // fraction rather than the rounded day.
+      exact = detail.exact ?? detail.day;
+      orient(dateOfDay(exact));
+      startedAt = performance.now();
+      if (!frame) render();
     });
+
+    // Idle spin, unless the visitor asked for less movement.
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    startedAt = performance.now();
+    frame = requestAnimationFrame(tick);
   }
 
   document.addEventListener('astro:page-load', setup);

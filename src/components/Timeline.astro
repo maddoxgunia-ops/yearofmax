@@ -159,11 +159,18 @@ const months = MONTHS.map((label, index) => ({
     const draw = (): void => {
       track.style.transform = 'translate3d(' + -offset + 'px,0,0)';
       // Whichever day sits at the centre of the viewport is the one shown.
-      const centre = Math.min(total, Math.max(1, Math.round((offset + half() - day / 2) / day) + 1));
+      const raw = (offset + half() - day / 2) / day + 1;
+      const centre = Math.min(total, Math.max(1, Math.round(raw)));
       if (counter) counter.textContent = String(centre);
 
-      // The sky listens for this and redraws for that date.
-      document.dispatchEvent(new CustomEvent('timeline:day', { detail: { day: centre, total } }));
+      // `exact` carries the sub-day position. The counter only wants whole
+      // days, but anything driving Earth's rotation needs the fraction — a
+      // whole-day step is one full turn, so rounding first makes the spin
+      // invisible.
+      const exact = Math.min(total, Math.max(1, raw));
+      document.dispatchEvent(new CustomEvent('timeline:day', {
+        detail: { day: centre, exact, total },
+      }));
     };
 
     const pan = (delta: number): void => {
