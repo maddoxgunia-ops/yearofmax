@@ -35,8 +35,35 @@
     { body: Body.Neptune, size: 1.4, tint: '#D6E2FF' },
   ];
 
+  const DEG = Math.PI / 180;
+  /** J2000 north galactic pole, and the galactic longitude of the NCP. */
+  const NGP_RA = 192.85948 * DEG;
+  const NGP_DEC = 27.12825 * DEG;
+  const L_NCP = 122.93192 * DEG;
+
+  /** Galactic (l, b) in degrees to equatorial RA (hours) and Dec (degrees). */
+  function galactic(l: number, b: number): { ra: number; dec: number } {
+    const lr = l * DEG;
+    const br = b * DEG;
+    const dec = Math.asin(
+      Math.sin(NGP_DEC) * Math.sin(br) + Math.cos(NGP_DEC) * Math.cos(br) * Math.cos(L_NCP - lr),
+    );
+    const y = Math.cos(br) * Math.sin(L_NCP - lr);
+    const x = Math.cos(NGP_DEC) * Math.sin(br) - Math.sin(NGP_DEC) * Math.cos(br) * Math.cos(L_NCP - lr);
+    let ra = (NGP_RA + Math.atan2(y, x)) / DEG;
+    ra = ((ra % 360) + 360) % 360;
+    return { ra: ra / 15, dec: dec / DEG };
+  }
+
+  /** Deterministic jitter, so the band has texture but never shimmers. */
+  function noise(n: number): number {
+    const s = Math.sin(n * 12.9898) * 43758.5453;
+    return s - Math.floor(s);
+  }
+
   let canvas: HTMLCanvasElement | null = null;
   let ctx: CanvasRenderingContext2D | null = null;
+  let band: HTMLCanvasElement | null = null;
   let day = 1;
   let wired = false;
 
@@ -75,6 +102,78 @@
     c.fill();
   }
 
+  /**
+   * The Milky Way, painted once into an offscreen strip covering all 24 hours
+   * of right ascension. Its position on the sphere never changes — only the
+   * window onto it does — so scrubbing the year just blits a different slice
+   * rather than re-running a few thousand gradients.
+   */
+  function buildBand(w: number, h: number, pxPerHour: number): void {
+    const width = Math.ceil(24 * pxPerHour);
+    band = document.createElement('canvas');
+    band.width = width;
+    band.height = h;
+    const c = band.getContext('2d');
+    if (!c) { band = null; return; }
+
+    const place = (ra: number, dec: number): [number, number] =>
+      [ra * pxPerHour, (0.5 - dec / 180) * h];
+
+    c.globalCompositeOperation = 'lighter';
+
+    for (let l = 0; l < 360; l += 1.2) {
+      // Brightest toward the galactic centre, thinning to the anticentre.
+      const t = (Math.cos(l * DEG) + 1) / 2;
+      const warmth = t;
+
+      for (const b of [-14, -10, -7, -4.5, -2.5, -1, 0, 1, 2.5, 4.5, 7, 10, 14]) {
+        const { ra, dec } = galactic(l, b);
+        const [x, y] = place(ra, dec);
+
+        const fade = 1 - Math.abs(b) / 17;
+        const jitter = 0.65 + noise(l * 7.3 + b * 3.1) * 0.7;
+        const r = (30 + t * 44) * fade * jitter;
+        // Low per-blob alpha: these stack in the hundreds, and anything
+        // higher saturates the bulge to flat white.
+        const alpha = (0.004 + t * 0.011) * fade * jitter;
+
+        // Warm gold through the bulge, cool blue out toward Auriga.
+        const red = Math.round(150 + warmth * 105);
+        const green = Math.round(180 + warmth * 34);
+        const blue = Math.round(255 - warmth * 95);
+
+        const g = c.createRadialGradient(x, y, 0, x, y, r);
+        g.addColorStop(0, `rgba(${red},${green},${blue},${alpha})`);
+        g.addColorStop(1, `rgba(${red},${green},${blue},0)`);
+        c.fillStyle = g;
+        c.beginPath();
+        c.arc(x, y, r, 0, Math.PI * 2);
+        c.fill();
+      }
+    }
+
+    // The Great Rift: dust in front of the bulge, from Cygnus down to
+    // Sagittarius. Punched out of the glow rather than painted over it.
+    c.globalCompositeOperation = 'destination-out';
+    for (let l = -10; l < 60; l += 0.6) {
+      for (const b of [-1.5, 0.6, 2.4]) {
+        const { ra, dec } = galactic((l + 360) % 360, b);
+        const [x, y] = place(ra, dec);
+        const jitter = 0.55 + noise(l * 5.7 + b * 9.1) * 0.75;
+        const r = 17 * jitter;
+        const g = c.createRadialGradient(x, y, 0, x, y, r);
+        g.addColorStop(0, `rgba(0,0,0,${0.16 * jitter})`);
+        g.addColorStop(1, 'rgba(0,0,0,0)');
+        c.fillStyle = g;
+        c.beginPath();
+        c.arc(x, y, r, 0, Math.PI * 2);
+        c.fill();
+      }
+    }
+
+    c.globalCompositeOperation = 'source-over';
+  }
+
   function draw(): void {
     if (!ctx || !canvas) return;
 
@@ -99,6 +198,16 @@
       while (delta < -12) delta += 24;
       return [w / 2 + delta * pxPerHour, (0.5 - dec / 180) * h];
     };
+
+    // Milky Way underneath everything. Two blits so it wraps at 0h/24h.
+    if (!band) buildBand(w, h, pxPerHour);
+    if (band) {
+      const origin = w / 2 - centre * pxPerHour;
+      const width = band.width;
+      ctx.drawImage(band, origin, 0);
+      ctx.drawImage(band, origin - width, 0);
+      ctx.drawImage(band, origin + width, 0);
+    }
 
     ctx.globalCompositeOperation = 'lighter';
 
@@ -131,7 +240,8 @@
     if (wired) return;
     wired = true;
 
-    window.addEventListener('resize', () => { resize(); draw(); });
+    // The band is sized to the viewport, so it has to be rebuilt on resize.
+    window.addEventListener('resize', () => { band = null; resize(); draw(); });
     // The timeline owns the date; the sky follows it.
     document.addEventListener('timeline:day', (event) => {
       const next = (event as CustomEvent<{ day: number }>).detail?.day;
