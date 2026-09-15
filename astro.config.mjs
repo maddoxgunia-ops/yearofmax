@@ -9,5 +9,9 @@ export default defineConfig({
   build: {
     format: 'directory',
   },
+  // The game moved under /games/; keep the old link alive.
+  redirects: {
+    '/chess': '/games/chess/',
+  },
   integrations: [sitemap()],
 });

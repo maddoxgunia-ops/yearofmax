@@ -1,0 +1,94 @@
+---
+import Base from '../../layouts/Base.astro';
+
+const games = [
+  {
+    title: 'chess',
+    href: '/games/chess/',
+    summary: 'play the engine, play another person, or run a tournament.',
+  },
+];
+---
+
+<Base title="games · yearofmax" description="things built to be played.">
+  <section class="index">
+    <h1 class="heading">games</h1>
+
+    {games.length > 0 ? (
+      <ul class="games">
+        {games.map((game) => (
+          <li class="game" data-entry>
+            {/* Raw static page, not an Astro route: force a full load. */}
+            <a class="game__link" href={game.href} data-astro-reload>
+              <span class="game__stem" aria-hidden="true"></span>
+              <span class="game__text">
+                <span class="game__title heading">{game.title}</span>
+                <span class="game__summary">{game.summary}</span>
+              </span>
+            </a>
+          </li>
+        ))}
+      </ul>
+    ) : (
+      <div class="empty" data-empty><p class="label">nothing here yet.</p></div>
+    )}
+  </section>
+</Base>
+
+<style>
+  .index {
+    padding-top: 3rem;
+    padding-bottom: 2rem;
+  }
+
+  .index h1 {
+    margin-bottom: 2.5rem;
+  }
+
+  .game {
+    border-top: var(--hairline) solid var(--rule);
+  }
+
+  .game__link {
+    display: grid;
+    grid-template-columns: var(--hairline) 1fr;
+    column-gap: 1.75rem;
+    align-items: stretch;
+    padding: 1.75rem 0;
+  }
+
+  .game__stem {
+    background: var(--rule);
+    transition: background-color 420ms ease;
+  }
+
+  .game__text {
+    display: block;
+    max-width: var(--measure);
+  }
+
+  .game__title {
+    display: block;
+    color: var(--ink);
+    transition: color 420ms ease;
+  }
+
+  .game__summary {
+    display: block;
+    margin-top: 0.4rem;
+    color: var(--graphite);
+  }
+
+  .game:hover .game__stem {
+    background: var(--ink);
+  }
+
+  :global(html[data-motion='on']) .game:not(.is-lit) .game__title {
+    color: var(--graphite);
+  }
+
+  .empty {
+    border-top: var(--hairline) solid var(--rule);
+    padding: 1.75rem 0;
+  }
+</style>
