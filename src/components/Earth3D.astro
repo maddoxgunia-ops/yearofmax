@@ -35,10 +35,14 @@
   import {
     AdditiveBlending, BackSide, BufferGeometry, Float32BufferAttribute, Group,
     Line, LineBasicMaterial, Matrix4, Mesh, MeshBasicMaterial, PerspectiveCamera,
-    Quaternion, Scene, ShaderMaterial, SphereGeometry, SRGBColorSpace, Vector2,
+    CanvasTexture, DoubleSide, PlaneGeometry, Quaternion, RingGeometry, Scene,
+    ShaderMaterial,
+    SphereGeometry, SRGBColorSpace, Vector2,
     TextureLoader, Vector3, WebGLRenderer,
   } from 'three';
-  import { Body, Equator, MakeTime, Observer, SiderealTime } from 'astronomy-engine';
+  import {
+    Body, Ecliptic, Equator, HelioVector, MakeTime, Observer, SiderealTime,
+  } from 'astronomy-engine';
 
   const SURFACE_VERT = `
     varying vec2 vUv;
@@ -119,6 +123,14 @@
   /** Drift of the cloud deck, in texture widths per second. */
   const CLOUD_DRIFT = 0.0022;
 
+  /** Where the system sits in front of the camera, and how big. */
+  const SYSTEM_AT = new Vector3(0, 0.55, -14);
+  /** Radial compression. Linear puts Mercury inside the Sun and Neptune off-screen. */
+  const FALLOFF = 0.42;
+  const SYSTEM_REACH = 6.1;
+  /** Tilt of the orbital plane away from face-on. */
+  const SYSTEM_TILT = -1.02;
+
   /** Sky radius. Everything distant lives just inside it. */
   const SKY = 90;
   const PLANET_SHELL = 70;
@@ -130,14 +142,26 @@
    */
   const SPIN_MINUTES_PER_SECOND = 7;
 
-  const PLANETS: Array<{ body: Body; size: number; colour: number }> = [
-    { body: Body.Venus, size: 0.63, colour: 0xfff0cc },
-    { body: Body.Jupiter, size: 0.57, colour: 0xffe9c4 },
-    { body: Body.Mars, size: 0.45, colour: 0xff9a6a },
-    { body: Body.Mercury, size: 0.36, colour: 0xe8e4dc },
-    { body: Body.Saturn, size: 0.42, colour: 0xffeec2 },
-    { body: Body.Uranus, size: 0.27, colour: 0xc8f0f4 },
-    { body: Body.Neptune, size: 0.26, colour: 0xaec4ff },
+  type Look = 'cratered' | 'swirled' | 'rusty' | 'banded' | 'pale' | 'deep';
+
+  interface PlanetDef {
+    body: Body;
+    /** Drawn radius. Real ratios span 1:28 and are unusable; order is kept. */
+    size: number;
+    look: Look;
+    base: string;
+    mark: string;
+    ring?: boolean;
+  }
+
+  const PLANETS: PlanetDef[] = [
+    { body: Body.Mercury, size: 0.17, look: 'cratered', base: '#9a948c', mark: '#6b665f' },
+    { body: Body.Venus, size: 0.24, look: 'swirled', base: '#d9bd85', mark: '#f2e3bb' },
+    { body: Body.Mars, size: 0.20, look: 'rusty', base: '#b5563a', mark: '#7d3524' },
+    { body: Body.Jupiter, size: 0.46, look: 'banded', base: '#cbae86', mark: '#8d6f4e' },
+    { body: Body.Saturn, size: 0.40, look: 'banded', base: '#d8c193', mark: '#a08a62', ring: true },
+    { body: Body.Uranus, size: 0.29, look: 'pale', base: '#9fd3da', mark: '#7fb9c4' },
+    { body: Body.Neptune, size: 0.28, look: 'deep', base: '#5a7fd4', mark: '#31509b' },
   ];
 
   /** Geocentric, for RA/Dec that matches the star map's frame. */
@@ -154,6 +178,8 @@
   let sunDir: Vector3 | null = null;
   let sunMesh: Mesh | null = null;
   let surfaceMat: ShaderMaterial | null = null;
+  /** The Sun and its planets, held flat and tilted in front of the camera. */
+  let system: Group | null = null;
   let label: HTMLElement | null = null;
   const pointer = new Vector2(-9999, -9999);
   const projected = new Vector3();
@@ -223,18 +249,25 @@
     // would have thrown it out of line with the celestial pole.
     const sun = equatorOf(Body.Sun, when);
     const sunLocal = direction(sun.ra, sun.dec);
-    // The Sun mesh is a child of the sky group, so it takes the group's
-    // rotation for free. The shader's sunDir is in world space and does not.
-    sunMesh?.position.copy(sunLocal).multiplyScalar(PLANET_SHELL);
+    // The Sun mesh is pinned at the centre of the system and never moves — it
+    // is what everything else is arranged around. Only the lighting direction
+    // comes from the real sky.
     sunDir.copy(sunLocal);
     if (sky) sunDir.applyQuaternion(sky.quaternion);
     if (sky && earthPivot) earthPivot.quaternion.copy(sky.quaternion);
 
+    // Planets sit at their real heliocentric angle and distance around the
+    // Sun, not at their direction in the sky. With the Sun pinned to the
+    // centre of frame, sky directions would bunch every planet on top of it —
+    // only Mercury and Venus are ever near the Sun from here.
     for (const planet of PLANETS) {
       const mesh = planetMeshes.get(planet.body);
       if (!mesh) continue;
-      const eq = equatorOf(planet.body, when);
-      mesh.position.copy(direction(eq.ra, eq.dec)).multiplyScalar(PLANET_SHELL);
+      const pos = helioOf(planet.body, when);
+      const radius = orbitRadius(Math.hypot(pos.x, pos.y));
+      const angle = Math.atan2(pos.y, pos.x);
+      mesh.position.set(Math.cos(angle) * radius, Math.sin(angle) * radius, 0);
+      mesh.rotation.y += 0.004; // slow spin, so the design reads as a surface
     }
 
     baseSpin = (SiderealTime(MakeTime(when)) / 24) * Math.PI * 2;
@@ -263,6 +296,136 @@
       opacity: 0.18,
       depthWrite: false,
     }));
+  }
+
+
+  /**
+   * Procedural surface for each planet, drawn to a canvas and wrapped as an
+   * equirectangular map. No texture downloads: a few hundred bytes of code
+   * instead of a few hundred kilobytes of imagery, and enough of a design that
+   * each body is recognisable at this size.
+   */
+  function surfaceOf(def: PlanetDef): CanvasTexture {
+    const w = 256;
+    const h = 128;
+    const c = document.createElement('canvas');
+    c.width = w;
+    c.height = h;
+    const g = c.getContext('2d')!;
+
+    g.fillStyle = def.base;
+    g.fillRect(0, 0, w, h);
+
+    // Deterministic, so a planet looks the same on every visit.
+    let seed = def.size * 9973;
+    const rnd = (): number => {
+      seed = (seed * 16807) % 2147483647;
+      return seed / 2147483647;
+    };
+
+    if (def.look === 'banded' || def.look === 'pale' || def.look === 'deep') {
+      const bands = def.look === 'banded' ? 14 : 7;
+      for (let i = 0; i < bands; i++) {
+        const y = (i / bands) * h;
+        const tall = (h / bands) * (0.45 + rnd() * 0.75);
+        g.globalAlpha = def.look === 'banded' ? 0.30 + rnd() * 0.35 : 0.12 + rnd() * 0.16;
+        g.fillStyle = i % 2 ? def.mark : def.base;
+        g.fillRect(0, y, w, tall);
+      }
+      g.globalAlpha = 1;
+
+      if (def.look === 'banded' && def.body === Body.Jupiter) {
+        // The Great Red Spot.
+        g.fillStyle = '#a8543c';
+        g.beginPath();
+        g.ellipse(w * 0.62, h * 0.63, w * 0.075, h * 0.055, 0, 0, Math.PI * 2);
+        g.fill();
+      }
+      if (def.look === 'deep') {
+        g.fillStyle = '#20356e';
+        g.beginPath();
+        g.ellipse(w * 0.4, h * 0.45, w * 0.07, h * 0.05, 0, 0, Math.PI * 2);
+        g.fill();
+      }
+    }
+
+    if (def.look === 'cratered') {
+      for (let i = 0; i < 90; i++) {
+        const r = 1.5 + rnd() * 6;
+        g.globalAlpha = 0.18 + rnd() * 0.3;
+        g.fillStyle = rnd() > 0.5 ? def.mark : '#b6b0a7';
+        g.beginPath();
+        g.arc(rnd() * w, rnd() * h, r, 0, Math.PI * 2);
+        g.fill();
+      }
+      g.globalAlpha = 1;
+    }
+
+    if (def.look === 'rusty') {
+      for (let i = 0; i < 40; i++) {
+        g.globalAlpha = 0.16 + rnd() * 0.24;
+        g.fillStyle = def.mark;
+        g.beginPath();
+        g.ellipse(rnd() * w, rnd() * h, 6 + rnd() * 26, 4 + rnd() * 12, rnd() * 3, 0, Math.PI * 2);
+        g.fill();
+      }
+      g.globalAlpha = 1;
+      // Polar caps.
+      g.fillStyle = '#e8e2dc';
+      g.fillRect(0, 0, w, 4);
+      g.fillRect(0, h - 5, w, 5);
+    }
+
+    if (def.look === 'swirled') {
+      for (let i = 0; i < 26; i++) {
+        g.globalAlpha = 0.14 + rnd() * 0.2;
+        g.strokeStyle = rnd() > 0.5 ? def.mark : '#b99b63';
+        g.lineWidth = 3 + rnd() * 9;
+        g.beginPath();
+        const y = rnd() * h;
+        g.moveTo(0, y);
+        g.bezierCurveTo(w * 0.3, y + (rnd() - 0.5) * 30, w * 0.7, y + (rnd() - 0.5) * 30, w, y);
+        g.stroke();
+      }
+      g.globalAlpha = 1;
+    }
+
+    const texture = new CanvasTexture(c);
+    texture.colorSpace = SRGBColorSpace;
+    return texture;
+  }
+
+  /**
+   * Soft radial falloff for the corona. Nested spheres with flat opacity
+   * render as hard-edged discs — a sphere has no falloff across its face, so
+   * each shell reads as a solid ring rather than glow.
+   */
+  function glowTexture(): CanvasTexture {
+    const size = 256;
+    const c = document.createElement('canvas');
+    c.width = size;
+    c.height = size;
+    const g = c.getContext('2d')!;
+    const grad = g.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+    grad.addColorStop(0, 'rgba(255,248,224,1)');
+    grad.addColorStop(0.09, 'rgba(255,226,150,0.85)');
+    grad.addColorStop(0.22, 'rgba(255,183,88,0.34)');
+    grad.addColorStop(0.48, 'rgba(255,146,52,0.10)');
+    grad.addColorStop(1, 'rgba(255,130,40,0)');
+    g.fillStyle = grad;
+    g.fillRect(0, 0, size, size);
+    return new CanvasTexture(c);
+  }
+
+  /** Heliocentric ecliptic position, in AU. */
+  function helioOf(body: Body, when: Date): { x: number; y: number } {
+    const e = Ecliptic(HelioVector(body, MakeTime(when)));
+    return { x: e.vec.x, y: e.vec.y };
+  }
+
+  /** Compressed radius for an orbit, in scene units. */
+  function orbitRadius(au: number): number {
+    return (SYSTEM_REACH / Math.pow(30, FALLOFF)) * Math.pow(au, FALLOFF);
   }
 
   /** Screen-space pick. Cheaper and far more forgiving than raycasting a
@@ -459,26 +622,76 @@
     earthPivot.add(air);
 
     // --- sun and planets ---------------------------------------------------
-    sunMesh = new Mesh(
-      new SphereGeometry(1.7, 32, 32),
-      new MeshBasicMaterial({ color: 0xfff6e0 }),
-    );
-    sky.add(sunMesh);
+    // A flat disc laid out in front of the camera and tilted, rather than
+    // anything on the celestial sphere. The Sun is the fixed centre of it.
+    system = new Group();
+    system.position.copy(SYSTEM_AT);
+    system.rotation.x = SYSTEM_TILT;
+    scene.add(system);
 
-    const corona = new Mesh(
-      new SphereGeometry(5.5, 32, 32),
-      new MeshBasicMaterial({ color: 0xffca70, transparent: true, opacity: 0.20, blending: AdditiveBlending, depthWrite: false }),
+    sunMesh = new Mesh(
+      new SphereGeometry(0.92, 48, 48),
+      new MeshBasicMaterial({ color: 0xfff3d2 }),
     );
-    sunMesh.add(corona);
+    system.add(sunMesh);
+
+    const glow = new Mesh(
+      new PlaneGeometry(11, 11),
+      new MeshBasicMaterial({
+        map: glowTexture(),
+        transparent: true,
+        blending: AdditiveBlending,
+        depthWrite: false,
+        depthTest: false,
+      }),
+    );
+    // Counter-rotates the system tilt so the glow faces the camera rather than
+    // lying flat in the orbital plane.
+    glow.rotation.x = -SYSTEM_TILT;
+    glow.renderOrder = -1;
+    sunMesh.add(glow);
 
     for (const planet of PLANETS) {
       const mesh = new Mesh(
-        new SphereGeometry(planet.size, 16, 16),
-        new MeshBasicMaterial({ color: planet.colour }),
+        new SphereGeometry(planet.size, 32, 24),
+        new MeshBasicMaterial({ map: surfaceOf(planet) }),
       );
       planetMeshes.set(planet.body, mesh);
-      sky.add(mesh);
-      sky.add(pathOf(planet.body, planet.colour));
+      system.add(mesh);
+
+      if (planet.ring) {
+        const ring = new Mesh(
+          new RingGeometry(planet.size * 1.45, planet.size * 2.25, 48),
+          new MeshBasicMaterial({
+            color: 0xe0cba0,
+            side: DoubleSide,
+            transparent: true,
+            opacity: 0.55,
+            depthWrite: false,
+          }),
+        );
+        // Flat in the orbital plane, so it reads as a ring rather than a disc
+        // seen face-on.
+        ring.rotation.x = Math.PI / 2;
+        mesh.add(ring);
+      }
+
+      // Orbit as a line, a true circle at the compressed radius.
+      const au = Math.hypot(helioOf(planet.body, dateOfDay(exact)).x, helioOf(planet.body, dateOfDay(exact)).y);
+      const r = orbitRadius(au);
+      const points: number[] = [];
+      for (let i = 0; i <= 128; i++) {
+        const a = (i / 128) * Math.PI * 2;
+        points.push(Math.cos(a) * r, Math.sin(a) * r, 0);
+      }
+      const geometry = new BufferGeometry();
+      geometry.setAttribute('position', new Float32BufferAttribute(points, 3));
+      system.add(new Line(geometry, new LineBasicMaterial({
+        color: 0x8fa4c4,
+        transparent: true,
+        opacity: 0.16,
+        depthWrite: false,
+      })));
     }
 
     // --- meteors -----------------------------------------------------------
