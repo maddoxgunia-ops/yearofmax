@@ -8,7 +8,7 @@ const now = new Date();
 const entries = (await getCollection('projects', ({ data }) => !data.draft)).sort(byDateDesc);
 ---
 
-<Base title="projects · yearofmax" description="what's being built, what shipped, what got abandoned.">
+<Base title="projects · yearofmax" description="">
   <section class="index">
     <h1 class="heading">projects</h1>
 
@@ -27,7 +27,7 @@ const entries = (await getCollection('projects', ({ data }) => !data.draft)).sor
         ))}
       </ul>
     ) : (
-      <div class="empty" data-empty><p class="label">nothing here yet.</p></div>
+      <div class="empty" data-empty><p class="label"></p></div>
     )}
   </section>
 </Base>

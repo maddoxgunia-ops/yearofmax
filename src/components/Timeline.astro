@@ -1,0 +1,186 @@
+---
+// Day-of-year and year length, computed in UTC at build time. The client
+// recomputes on load so a stale build never shows the wrong position.
+const MONTHS = [
+  'jan', 'feb', 'mar', 'apr', 'may', 'jun',
+  'jul', 'aug', 'sep', 'oct', 'nov', 'dec',
+] as const;
+
+const DAY_MS = 86_400_000;
+
+const now = new Date();
+const year = now.getUTCFullYear();
+const yearStart = Date.UTC(year, 0, 1);
+const totalDays = Math.round((Date.UTC(year + 1, 0, 1) - yearStart) / DAY_MS);
+const today = Date.UTC(year, now.getUTCMonth(), now.getUTCDate());
+const dayOfYear = Math.round((today - yearStart) / DAY_MS) + 1;
+
+/** Width of one day. The year is deliberately wider than any viewport. */
+const DAY = 14;
+
+const months = MONTHS.map((label, index) => ({
+  label,
+  day: Math.round((Date.UTC(year, index, 1) - yearStart) / DAY_MS),
+}));
+---
+
+<div
+  class="tl"
+  data-timeline
+  data-day={DAY}
+  data-total={totalDays}
+  data-today={dayOfYear}
+  aria-hidden="true"
+>
+  <div class="tl__track" data-track style={`width:${totalDays * DAY}px`}>
+    <div class="tl__days" style={`--day:${DAY}px`}></div>
+    <div class="tl__rule"></div>
+
+    {months.map((m) => (
+      <span class="tl__tick" style={`left:${m.day * DAY}px`}></span>
+    ))}
+    {months.map((m) => (
+      <span class="tl__month label" style={`left:${m.day * DAY}px`}>{m.label}</span>
+    ))}
+
+    <span class="tl__now" data-now style={`left:${(dayOfYear - 1) * DAY}px`}></span>
+  </div>
+</div>
+
+<style>
+  /* Sits behind the page and never takes pointer events, so it can cross the
+     middle of the viewport without blocking anything. Panning is driven from
+     the window (see the script below). */
+  .tl {
+    position: fixed;
+    top: 50%;
+    left: 0;
+    right: 0;
+    height: 64px;
+    margin-top: -32px;
+    overflow: hidden;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .tl__track {
+    position: relative;
+    height: 100%;
+    will-change: transform;
+  }
+
+  /* One fine tick per day, as a gradient rather than 365 elements. */
+  .tl__days {
+    position: absolute;
+    top: 24px;
+    left: 0;
+    right: 0;
+    height: 5px;
+    background: repeating-linear-gradient(
+      to right,
+      var(--rule) 0 var(--hairline),
+      transparent var(--hairline) var(--day)
+    );
+    opacity: 0.55;
+  }
+
+  .tl__rule {
+    position: absolute;
+    top: 24px;
+    left: 0;
+    right: 0;
+    height: var(--hairline);
+    background: var(--rule);
+  }
+
+  .tl__tick {
+    position: absolute;
+    top: 16px;
+    width: var(--hairline);
+    height: 14px;
+    background: var(--graphite);
+  }
+
+  .tl__month {
+    position: absolute;
+    top: 36px;
+    color: var(--graphite);
+    transform: translateX(-0.05em);
+  }
+
+  .tl__now {
+    position: absolute;
+    top: 14px;
+    width: 2px;
+    height: 22px;
+    background: var(--signal);
+  }
+</style>
+
+<script>
+  const MIN_DELTA = 0.5;
+
+  function setup(): void {
+    const root = document.querySelector<HTMLElement>('[data-timeline]');
+    const track = document.querySelector<HTMLElement>('[data-track]');
+    if (!root || !track) return;
+
+    const day = Number(root.dataset.day ?? 14);
+    const DAY_MS = 86_400_000;
+
+    // Correct the build-time position against the visitor's own date.
+    const now = new Date();
+    const year = now.getUTCFullYear();
+    const yearStart = Date.UTC(year, 0, 1);
+    const total = Math.round((Date.UTC(year + 1, 0, 1) - yearStart) / DAY_MS);
+    const today = Date.UTC(year, now.getUTCMonth(), now.getUTCDate());
+    const dayOfYear = Math.round((today - yearStart) / DAY_MS) + 1;
+
+    track.style.width = total * day + 'px';
+    const marker = document.querySelector<HTMLElement>('[data-now]');
+    if (marker) marker.style.left = (dayOfYear - 1) * day + 'px';
+
+    const span = (): number => Math.max(0, total * day - window.innerWidth);
+    // Open on today, centred.
+    let offset = Math.min(span(), Math.max(0, (dayOfYear - 1) * day - window.innerWidth / 2));
+
+    const draw = (): void => {
+      track.style.transform = 'translate3d(' + -offset + 'px,0,0)';
+    };
+
+    const pan = (delta: number): void => {
+      const next = Math.min(span(), Math.max(0, offset + delta));
+      if (Math.abs(next - offset) < MIN_DELTA) return;
+      offset = next;
+      draw();
+    };
+
+    // The page is locked to the viewport, so a vertical wheel has nothing else
+    // to do — it scrubs the year. On any page that genuinely scrolls, leave the
+    // wheel alone and let the page have it.
+    window.addEventListener('wheel', (event) => {
+      const scrolls = document.documentElement.scrollHeight > window.innerHeight + 1;
+      if (scrolls) return;
+      const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+      if (delta === 0) return;
+      event.preventDefault();
+      pan(delta);
+    }, { passive: false });
+
+    window.addEventListener('keydown', (event) => {
+      const tag = (event.target as Element | null)?.tagName ?? '';
+      if (/^(INPUT|TEXTAREA|SELECT)$/.test(tag)) return;
+      const step = event.shiftKey ? day * 30 : day * 7;
+      if (event.key === 'ArrowRight') pan(step);
+      else if (event.key === 'ArrowLeft') pan(-step);
+      else return;
+      event.preventDefault();
+    });
+
+    window.addEventListener('resize', () => pan(0));
+
+    draw();
+  }
+
+  document.addEventListener('astro:page-load', setup);
+</script>

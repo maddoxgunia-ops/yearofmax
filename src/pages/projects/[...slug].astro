@@ -23,7 +23,7 @@ const { existsSync } = await import('node:fs');
 const hasDetail = !!entry.data.detail && existsSync(`public${entry.data.detail}`);
 ---
 
-<Base title={entry.data.title} description={entry.data.summary}>
+<Base title={entry.data.title} description="">
   <article class="detail" class:list={{ 'is-recent': recent }}>
     <p class="detail__meta label">
       <time datetime={entry.data.date.toISOString()}>{formatDate(entry.data.date)}</time>

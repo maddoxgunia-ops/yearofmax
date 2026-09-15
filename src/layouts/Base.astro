@@ -2,7 +2,6 @@
 import '../styles/global.css';
 import 'lenis/dist/lenis.css';
 import { ClientRouter } from 'astro:transitions';
-import YearTrack from '../components/YearTrack.astro';
 
 interface Props {
   title?: string;
@@ -14,7 +13,6 @@ const { title, description, ogImage } = Astro.props;
 
 const canonical = new URL(Astro.url.pathname, Astro.site).href;
 const ogImageUrl = new URL(ogImage ?? '/og.png', Astro.site).href;
-const feedUrl = new URL('/rss.xml', Astro.site).href;
 ---
 
 <!doctype html>
@@ -29,8 +27,6 @@ const feedUrl = new URL('/rss.xml', Astro.site).href;
     <title>{title}</title>
     <meta name="description" content={description ?? ''} />
     <link rel="canonical" href={canonical} />
-
-    <link rel="alternate" type="application/rss+xml" title="yearofmax" href={feedUrl} />
 
     {/* OpenGraph */}
     <meta property="og:type" content="website" />
@@ -51,12 +47,9 @@ const feedUrl = new URL('/rss.xml', Astro.site).href;
   </head>
 
   <body>
-    <YearTrack />
-
     <nav class="wrap site-nav">
       <ul>
         <li><a href="/">home</a></li>
-        <li><a href="/log/">log</a></li>
         <li><a href="/projects/">projects</a></li>
         <li class="site-nav__end"><a href="/tools/">tools</a></li>
         <li><a href="/games/">games</a></li>

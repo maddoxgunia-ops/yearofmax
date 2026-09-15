@@ -9,11 +9,6 @@ const shared = {
   draft: z.boolean().default(false),
 };
 
-const log = defineCollection({
-  loader: glob({ base: './src/content/log', pattern: '**/*.md' }),
-  schema: z.object(shared),
-});
-
 const projects = defineCollection({
   loader: glob({ base: './src/content/projects', pattern: '**/*.md' }),
   schema: z.object({
@@ -25,4 +20,4 @@ const projects = defineCollection({
   }),
 });
 
-export const collections = { log, projects };
+export const collections = { projects };

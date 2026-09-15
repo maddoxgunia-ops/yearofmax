@@ -1,14 +1,6 @@
 ---
-import { getCollection } from 'astro:content';
 import Base from '../layouts/Base.astro';
-import EntryRow from '../components/EntryRow.astro';
-import { byDateDesc, isRecent } from '../lib/entries';
-
-const LATEST = 8;
-
-const entries = (await getCollection('log', ({ data }) => !data.draft))
-  .sort(byDateDesc)
-  .slice(0, LATEST);
+import Timeline from '../components/Timeline.astro';
 
 const DAY_MS = 86_400_000;
 const now = new Date();
@@ -19,39 +11,22 @@ const today = Date.UTC(year, now.getUTCMonth(), now.getUTCDate());
 const dayOfYear = Math.round((today - yearStart) / DAY_MS) + 1;
 ---
 
-<Base title="yearofmax" description="working notes and projects, logged as they happen.">
-  <section class="hero" data-hero>
+<Base title="yearofmax" description="">
+  <Timeline />
+
+  <section class="hero">
     <p class="counter" data-counter>{dayOfYear}</p>
     <p class="label" data-counter-total>{totalDays}</p>
-    <h1 class="heading">everything i make, logged as i make it.</h1>
-    <p class="measure">no drafts folder, no tidying up afterwards. entries go up dated, projects go up unfinished.</p>
-  </section>
-
-  <section class="latest">
-    <h2 class="label">latest</h2>
-
-    {entries.length > 0 ? (
-      <ul class="entries">
-        {entries.map((entry) => (
-          <EntryRow
-            href={`/log/${entry.id}/`}
-            title={entry.data.title}
-            summary={entry.data.summary}
-            date={entry.data.date}
-            recent={isRecent(entry.data.date, now)}
-          />
-        ))}
-      </ul>
-    ) : (
-      <div class="empty" data-empty><p class="label">nothing logged yet.</p></div>
-    )}
+    <h1 class="heading"></h1>
+    <p class="measure"></p>
   </section>
 </Base>
 
 <style>
-  /* Vertical rhythm compresses on short viewports so the page keeps
-     fitting the screen without shrinking the type. */
+  /* Above the timeline, which is fixed at z-index 0. */
   .hero {
+    position: relative;
+    z-index: 1;
     padding-top: clamp(1.25rem, 4vh, 3rem);
     padding-bottom: clamp(1.5rem, 5vh, 4rem);
   }
@@ -59,19 +34,6 @@ const dayOfYear = Math.round((today - yearStart) / DAY_MS) + 1;
   .hero h1,
   .hero .measure {
     margin-top: clamp(0.75rem, 2.5vh, 2rem);
-  }
-
-  .latest {
-    padding-bottom: 2rem;
-  }
-
-  .latest h2 {
-    margin-bottom: clamp(0.6rem, 1.6vh, 1.25rem);
-  }
-
-  .empty {
-    border-top: var(--hairline) solid var(--rule);
-    padding: 1.75rem 0;
   }
 </style>
 
