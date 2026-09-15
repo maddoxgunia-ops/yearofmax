@@ -1,0 +1,429 @@
+---
+import Base from '../../layouts/Base.astro';
+import * as C from '../../scripts/tools/colour';
+
+// The page renders a real, complete state at build time so it is valid and
+// readable with JavaScript disabled. The client script then updates the same
+// nodes in place — it never builds structure, so the two cannot diverge.
+const START = C.parseHex('#D83F46') ?? { r: 216, g: 63, b: 70 };
+
+const hsl = C.rgbToHsl(START);
+const hsv = C.rgbToHsv(START);
+const oklch = C.rgbToOklch(START);
+const cmyk = C.rgbToCmyk(START);
+const hex = C.toHex(START);
+
+const WHITE = { r: 255, g: 255, b: 255 };
+const BLACK = { r: 0, g: 0, b: 0 };
+const PAPER = C.parseHex('#E7E9E2') ?? WHITE;
+const INK = C.parseHex('#141A18') ?? BLACK;
+
+const grounds = [
+  { name: 'white', rgb: WHITE },
+  { name: 'black', rgb: BLACK },
+  { name: 'paper', rgb: PAPER },
+  { name: 'ink', rgb: INK },
+];
+
+const variations = [
+  { name: 'tailwind', colours: C.tailwind(START), steps: C.TAILWIND_STEPS.map(String) },
+  { name: 'shades', colours: C.shades(START), steps: [] },
+  { name: 'tints', colours: C.tints(START), steps: [] },
+  { name: 'tones', colours: C.tones(START), steps: [] },
+];
+---
+
+<Base title="colour · yearofmax" description="pick, convert, compare.">
+  <section class="tool" data-colour-tool data-start={hex}>
+    <header class="tool__head">
+      <p class="tool__hex counter" data-hex>#{hex}</p>
+      <p class="tool__formats" data-formats>
+        rgb({START.r} {START.g} {START.b}) · hsl({hsl.h} {hsl.s}% {hsl.l}%) · oklch({oklch.l} {oklch.c} {oklch.h})
+      </p>
+
+      <div class="strip" data-strip>
+        {C.strip(START).map((c) => (
+          <button class="strip__step" type="button" data-step={C.toHex(c)} style={`background:#${C.toHex(c)}`}></button>
+        ))}
+      </div>
+
+      <div class="tool__actions">
+        <button class="act label" type="button" data-random>random</button>
+        <button class="act label" type="button" data-sample hidden>sample</button>
+        <button class="act label" type="button" data-copy={`#${hex}`}>copy hex</button>
+      </div>
+    </header>
+
+    <!-- pick -->
+    <section class="row">
+      <h2 class="row__name label">pick</h2>
+      <div class="row__body pick">
+        <div class="pick__field" data-field tabindex="0" role="slider" aria-label="saturation and value"
+             aria-valuemin="0" aria-valuemax="100" aria-valuenow={hsv.s}
+             style={`--hue:${hsl.h}`}>
+          <span class="pick__handle" data-handle style={`left:${hsv.s}%;top:${100 - hsv.v}%`}></span>
+        </div>
+        <div class="pick__hue" data-hue tabindex="0" role="slider" aria-label="hue"
+             aria-valuemin="0" aria-valuemax="360" aria-valuenow={hsl.h}>
+          <span class="pick__handle" data-hue-handle style={`left:${(hsl.h / 360) * 100}%`}></span>
+        </div>
+        <label class="pick__hex">
+          <span class="label">hex</span>
+          <input type="text" value={hex} spellcheck="false" autocomplete="off" data-input />
+        </label>
+      </div>
+    </section>
+
+    <!-- harmonies -->
+    <section class="row">
+      <h2 class="row__name label">harmonies</h2>
+      <div class="row__body">
+        {C.HARMONIES.map((h) => (
+          <div class="set" data-harmony={h.name}>
+            <div class="set__head">
+              <span class="label">{h.name}</span>
+              <span class="set__exports">
+                <button class="act label" type="button" data-export={h.name} data-as="css">css</button>
+                <button class="act label" type="button" data-export={h.name} data-as="list">list</button>
+                <button class="act label" type="button" data-export={h.name} data-as="json">json</button>
+              </span>
+            </div>
+            <div class="swatches">
+              {C.harmony(START, h.offsets).map((c) => (
+                <button class="sw" type="button" data-sw={C.toHex(c)} style={`background:#${C.toHex(c)}`}>
+                  <span class="sw__hex">{C.toHex(c)}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+
+    <!-- variations -->
+    <section class="row">
+      <h2 class="row__name label">variations</h2>
+      <div class="row__body">
+        {variations.map((v) => (
+          <div class="set" data-variation={v.name}>
+            <div class="set__head">
+              <span class="label">{v.name}</span>
+              <span class="set__exports">
+                <button class="act label" type="button" data-export={v.name} data-as="css">css</button>
+                <button class="act label" type="button" data-export={v.name} data-as="list">list</button>
+                <button class="act label" type="button" data-export={v.name} data-as="json">json</button>
+              </span>
+            </div>
+            <div class="swatches">
+              {v.colours.map((c, i) => (
+                <button class="sw" type="button" data-sw={C.toHex(c)} style={`background:#${C.toHex(c)}`}>
+                  <span class="sw__hex">{v.steps[i] ?? C.toHex(c)}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+
+    <!-- convert -->
+    <section class="row">
+      <h2 class="row__name label">convert</h2>
+      <div class="row__body">
+        <table class="convert">
+          <tbody>
+            <tr data-fmt="hex"><th class="label">hex</th><td data-raw>{hex}</td><td><button class="act" type="button" data-copy={`#${hex}`} data-css>#{hex}</button></td></tr>
+            <tr data-fmt="rgb"><th class="label">rgb</th><td data-raw>{START.r}, {START.g}, {START.b}</td><td><button class="act" type="button" data-copy={`rgb(${START.r} ${START.g} ${START.b})`} data-css>rgb({START.r} {START.g} {START.b})</button></td></tr>
+            <tr data-fmt="hsl"><th class="label">hsl</th><td data-raw>{hsl.h}, {hsl.s}, {hsl.l}</td><td><button class="act" type="button" data-copy={`hsl(${hsl.h} ${hsl.s}% ${hsl.l}%)`} data-css>hsl({hsl.h} {hsl.s}% {hsl.l}%)</button></td></tr>
+            <tr data-fmt="hsv"><th class="label">hsv</th><td data-raw>{hsv.h}, {hsv.s}, {hsv.v}</td><td><button class="act" type="button" data-copy={`hsv(${hsv.h} ${hsv.s}% ${hsv.v}%)`} data-css>hsv({hsv.h} {hsv.s}% {hsv.v}%)</button></td></tr>
+            <tr data-fmt="oklch"><th class="label">oklch</th><td data-raw>{oklch.l}, {oklch.c}, {oklch.h}</td><td><button class="act" type="button" data-copy={`oklch(${oklch.l} ${oklch.c} ${oklch.h})`} data-css>oklch({oklch.l} {oklch.c} {oklch.h})</button></td></tr>
+            <tr data-fmt="cmyk"><th class="label">cmyk</th><td data-raw>{cmyk.c}, {cmyk.m}, {cmyk.y}, {cmyk.k}</td><td><button class="act" type="button" data-copy={`cmyk(${cmyk.c}% ${cmyk.m}% ${cmyk.y}% ${cmyk.k}%)`} data-css>cmyk({cmyk.c}% {cmyk.m}% {cmyk.y}% {cmyk.k}%)</button></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- contrast -->
+    <section class="row">
+      <h2 class="row__name label">contrast</h2>
+      <div class="row__body">
+        <table class="contrast">
+          <thead>
+            <tr><th class="label">on</th><th class="label">ratio</th><th class="label">small</th><th class="label">large</th><th class="label">ui</th></tr>
+          </thead>
+          <tbody>
+            {grounds.map((g) => {
+              const ratio = C.contrast(START, g.rgb);
+              const w = C.wcag(ratio);
+              return (
+                <tr data-ground={g.name}>
+                  <th class="label">{g.name}</th>
+                  <td data-ratio>{ratio}:1</td>
+                  <td data-small>{w.smallAAA ? 'AAA' : w.smallAA ? 'AA' : '—'}</td>
+                  <td data-large>{w.largeAAA ? 'AAA' : w.largeAA ? 'AA' : '—'}</td>
+                  <td data-ui>{w.ui ? 'AA' : '—'}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- vision -->
+    <section class="row">
+      <h2 class="row__name label">vision</h2>
+      <div class="row__body">
+        <div class="swatches vision">
+          {C.VISION.map((v) => {
+            const sim = C.simulate(START, v);
+            return (
+              <button class="sw sw--tall" type="button" data-vision={v} data-sw={C.toHex(sim)} style={`background:#${C.toHex(sim)}`}>
+                <span class="sw__hex">{v}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </section>
+  </section>
+</Base>
+
+<style>
+  .tool {
+    padding-top: 2rem;
+    padding-bottom: 4rem;
+  }
+
+  /* The counter role is sized for three digits; a hex code is seven
+     characters and overflows the margin at that scale. */
+  .tool__hex {
+    color: var(--ink);
+    font-size: clamp(38px, 13vw, 140px);
+  }
+
+  .tool__formats {
+    margin-top: 0.5rem;
+    color: var(--graphite);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .strip {
+    display: flex;
+    margin-top: 2rem;
+    height: 46px;
+    border: var(--hairline) solid var(--rule);
+  }
+
+  .strip__step {
+    flex: 1;
+    border: 0;
+    padding: 0;
+    cursor: pointer;
+  }
+
+  .tool__actions {
+    display: flex;
+    gap: 1.25rem;
+    margin-top: 0.9rem;
+  }
+
+  .act {
+    border: 0;
+    background: none;
+    padding: 0;
+    color: var(--graphite);
+    cursor: pointer;
+    font: inherit;
+    font-stretch: var(--wdth-narrow);
+    font-size: var(--size-label);
+    letter-spacing: var(--track-label);
+    transition: color 160ms;
+  }
+
+  .act:hover {
+    color: var(--ink);
+  }
+
+  /* rows ---------------------------------------------------------------- */
+
+  .row {
+    display: grid;
+    grid-template-columns: 9rem 1fr;
+    gap: 1.75rem;
+    padding: 2.25rem 0;
+    border-top: var(--hairline) solid var(--rule);
+    margin-top: 2.5rem;
+  }
+
+  .row + .row {
+    margin-top: 0;
+  }
+
+  .row__name {
+    color: var(--graphite);
+    padding-top: 0.2em;
+  }
+
+  /* picker --------------------------------------------------------------- */
+
+  .pick__field {
+    position: relative;
+    width: 100%;
+    max-width: 30rem;
+    aspect-ratio: 5 / 3;
+    background:
+      linear-gradient(to top, #000, transparent),
+      linear-gradient(to right, #fff, transparent),
+      hsl(var(--hue) 100% 50%);
+    border: var(--hairline) solid var(--rule);
+    cursor: crosshair;
+    touch-action: none;
+  }
+
+  .pick__hue {
+    position: relative;
+    width: 100%;
+    max-width: 30rem;
+    height: 22px;
+    margin-top: 0.75rem;
+    border: var(--hairline) solid var(--rule);
+    cursor: ew-resize;
+    touch-action: none;
+    background: linear-gradient(to right,
+      hsl(0 100% 50%), hsl(60 100% 50%), hsl(120 100% 50%),
+      hsl(180 100% 50%), hsl(240 100% 50%), hsl(300 100% 50%), hsl(360 100% 50%));
+  }
+
+  .pick__handle {
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    margin: -6px 0 0 -6px;
+    border: 2px solid var(--paper);
+    border-radius: 50%;
+    box-shadow: 0 0 0 1px var(--ink);
+    pointer-events: none;
+  }
+
+  .pick__hue .pick__handle {
+    top: 50%;
+  }
+
+  .pick__hex {
+    display: flex;
+    align-items: baseline;
+    gap: 0.75rem;
+    margin-top: 1.1rem;
+  }
+
+  .pick__hex input {
+    font: inherit;
+    font-family: var(--family);
+    font-variant-numeric: tabular-nums;
+    text-transform: uppercase;
+    width: 9ch;
+    padding: 0.3rem 0.4rem;
+    color: var(--ink);
+    background: none;
+    border: var(--hairline) solid var(--rule);
+  }
+
+  .pick__hex input:focus-visible {
+    outline: 2px solid var(--ink);
+    outline-offset: 1px;
+  }
+
+  /* swatches -------------------------------------------------------------- */
+
+  .set + .set {
+    margin-top: 1.5rem;
+  }
+
+  .set__head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 0.5rem;
+    max-width: 40rem;
+  }
+
+  .set__exports {
+    display: flex;
+    gap: 0.9rem;
+  }
+
+  .swatches {
+    display: flex;
+    max-width: 40rem;
+    border: var(--hairline) solid var(--rule);
+  }
+
+  .sw {
+    flex: 1;
+    height: 56px;
+    border: 0;
+    padding: 0;
+    cursor: pointer;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    overflow: hidden;
+  }
+
+  .sw--tall {
+    height: 72px;
+  }
+
+  .sw__hex {
+    font-stretch: var(--wdth-narrow);
+    font-size: 9px;
+    letter-spacing: 0.04em;
+    padding-bottom: 4px;
+    color: rgb(255 255 255 / 0.85);
+    mix-blend-mode: difference;
+    white-space: nowrap;
+  }
+
+  /* tables ---------------------------------------------------------------- */
+
+  table {
+    border-collapse: collapse;
+    max-width: 40rem;
+    width: 100%;
+    font-variant-numeric: tabular-nums;
+  }
+
+  th, td {
+    text-align: left;
+    padding: 0.45rem 1rem 0.45rem 0;
+    border-bottom: var(--hairline) solid var(--rule);
+    font-weight: 400;
+  }
+
+  thead th {
+    color: var(--graphite);
+  }
+
+  .convert th {
+    color: var(--graphite);
+    width: 6rem;
+  }
+
+  .contrast th {
+    color: var(--graphite);
+  }
+
+  @media (max-width: 46rem) {
+    .row {
+      grid-template-columns: 1fr;
+      gap: 0.9rem;
+    }
+  }
+</style>
+
+<script>
+  import { init } from '../../scripts/tools/colour-ui';
+
+  document.addEventListener('astro:page-load', init);
+</script>

@@ -1,12 +1,25 @@
 ---
 import Base from '../../layouts/Base.astro';
+import ToolCard from '../../components/tools/ToolCard.astro';
+import ColourCard from '../../components/tools/ColourCard.astro';
+import { TOOLS } from '../../lib/tools';
 ---
 
 <Base title="tools · yearofmax" description="small things built to be used.">
   <section class="index">
     <h1 class="heading">tools</h1>
 
-    <div class="empty" data-empty><p class="label">nothing here yet.</p></div>
+    {TOOLS.length > 0 ? (
+      <ul class="cards">
+        {TOOLS.map((tool) => (
+          <ToolCard name={tool.name} summary={tool.summary} href={`/tools/${tool.slug}/`}>
+            {tool.slug === 'colour' && <ColourCard />}
+          </ToolCard>
+        ))}
+      </ul>
+    ) : (
+      <div class="empty" data-empty><p class="label">nothing here yet.</p></div>
+    )}
   </section>
 </Base>
 

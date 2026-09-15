@@ -1,0 +1,64 @@
+---
+interface Props {
+  name: string;
+  summary: string;
+  href: string;
+}
+
+const { name, summary, href } = Astro.props;
+---
+
+<li class="card" data-entry>
+  <a class="card__link" href={href}>
+    <span class="card__stem" aria-hidden="true"></span>
+    <span class="card__body">
+      <span class="card__name heading">{name}</span>
+      <span class="card__summary">{summary}</span>
+      <slot />
+    </span>
+  </a>
+</li>
+
+<style>
+  .card {
+    border-top: var(--hairline) solid var(--rule);
+  }
+
+  .card__link {
+    display: grid;
+    grid-template-columns: var(--hairline) 1fr;
+    column-gap: 1.75rem;
+    align-items: stretch;
+    padding: 1.75rem 0 2rem;
+  }
+
+  .card__stem {
+    background: var(--rule);
+    transition: background-color 420ms ease;
+  }
+
+  .card__body {
+    display: block;
+    max-width: 40rem;
+  }
+
+  .card__name {
+    display: block;
+    color: var(--ink);
+    transition: color 420ms ease;
+  }
+
+  .card__summary {
+    display: block;
+    margin-top: 0.4rem;
+    color: var(--graphite);
+  }
+
+  .card:hover .card__stem {
+    background: var(--ink);
+  }
+
+  :global(html[data-motion='on']) .card:not(.is-lit) .card__name {
+    color: var(--graphite);
+  }
+</style>
