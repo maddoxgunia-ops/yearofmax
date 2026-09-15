@@ -1,0 +1,240 @@
+---
+// Drawn entirely on the client: positions depend on the date the timeline is
+// parked on, which only exists at runtime.
+---
+
+<canvas class="solar" data-solar aria-hidden="true"></canvas>
+
+<style>
+  .solar {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    z-index: -1;
+    pointer-events: none;
+    display: block;
+  }
+</style>
+
+<script>
+  import { Body, HelioVector, Ecliptic, MakeTime } from 'astronomy-engine';
+
+  interface Planet {
+    body: Body;
+    /** Drawn radius in px. Real ratios span 1:28 and are unusable here, so
+     *  these are compressed but keep the true ordering. */
+    size: number;
+    lit: string;
+    dark: string;
+    ring?: boolean;
+  }
+
+  const PLANETS: Planet[] = [
+    { body: Body.Mercury, size: 4.2, lit: '#B8B2A8', dark: '#3A3733' },
+    { body: Body.Venus, size: 6.6, lit: '#F0D9A8', dark: '#4A4033' },
+    { body: Body.Earth, size: 7.0, lit: '#7FB2E5', dark: '#16283C' },
+    { body: Body.Mars, size: 5.2, lit: '#D97B54', dark: '#3E2116' },
+    { body: Body.Jupiter, size: 16, lit: '#DFC49A', dark: '#40342A' },
+    { body: Body.Saturn, size: 13.5, lit: '#E3CFA0', dark: '#42372A', ring: true },
+    { body: Body.Uranus, size: 9.6, lit: '#AEE0E4', dark: '#233C40', ring: true },
+    { body: Body.Neptune, size: 9.0, lit: '#8BA9E8', dark: '#1B2542' },
+  ];
+
+  /** Radial compression. Linear would put Mercury inside the Sun's glow while
+   *  Neptune sat thirty screens away. */
+  const FALLOFF = 0.42;
+  /** Foreshortening of the ecliptic plane — a tilted overhead view. */
+  const SQUASH = 0.38;
+
+  let canvas: HTMLCanvasElement | null = null;
+  let ctx: CanvasRenderingContext2D | null = null;
+  let day = 1;
+  let wired = false;
+
+  function dateOfDay(d: number): Date {
+    const year = new Date().getUTCFullYear();
+    return new Date(Date.UTC(year, 0, 1) + (d - 1) * 86_400_000 + 86_400_000 / 2);
+  }
+
+  /** Ecliptic x/y/z in AU. HelioVector is equatorial, which tilts every orbit
+   *  by the obliquity if used directly. */
+  function eclipticOf(body: Body, when: Date): { x: number; y: number; z: number } {
+    const e = Ecliptic(HelioVector(body, MakeTime(when)));
+    return { x: e.vec.x, y: e.vec.y, z: e.vec.z };
+  }
+
+  function resize(): void {
+    if (!canvas || !ctx) return;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.round(window.innerWidth * dpr);
+    canvas.height = Math.round(window.innerHeight * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  /** A lit sphere: terminator driven by the real direction of the Sun. */
+  function sphere(
+    c: CanvasRenderingContext2D,
+    x: number, y: number, r: number,
+    lit: string, dark: string,
+    sunX: number, sunY: number,
+  ): void {
+    const dx = sunX - x;
+    const dy = sunY - y;
+    const len = Math.hypot(dx, dy) || 1;
+    const ox = (dx / len) * r * 0.45;
+    const oy = (dy / len) * r * 0.45;
+
+    const g = c.createRadialGradient(x + ox, y + oy, r * 0.05, x, y, r);
+    g.addColorStop(0, lit);
+    g.addColorStop(0.55, lit);
+    g.addColorStop(1, dark);
+    c.fillStyle = g;
+    c.beginPath();
+    c.arc(x, y, r, 0, Math.PI * 2);
+    c.fill();
+
+    // Thin rim of light on the sunward limb.
+    c.strokeStyle = 'rgba(255,255,255,0.22)';
+    c.lineWidth = Math.max(0.6, r * 0.09);
+    c.beginPath();
+    c.arc(x, y, r * 0.97, Math.atan2(dy, dx) - 1.1, Math.atan2(dy, dx) + 1.1);
+    c.stroke();
+  }
+
+  function rings(c: CanvasRenderingContext2D, x: number, y: number, r: number, tint: string): void {
+    c.save();
+    c.translate(x, y);
+    c.scale(1, SQUASH);
+    for (const [inner, width, alpha] of [[1.5, 0.5, 0.5], [2.15, 0.28, 0.3]] as const) {
+      c.strokeStyle = tint;
+      c.globalAlpha = alpha;
+      c.lineWidth = r * width;
+      c.beginPath();
+      c.arc(0, 0, r * inner, 0, Math.PI * 2);
+      c.stroke();
+    }
+    c.globalAlpha = 1;
+    c.restore();
+  }
+
+  function draw(): void {
+    if (!ctx || !canvas) return;
+
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    ctx.clearRect(0, 0, w, h);
+
+    const when = dateOfDay(day);
+
+    // Neptune sets the outer bound, and the camera sits one Earth-orbit off
+    // centre, so the scene spans (neptune + earth) either side. Width and
+    // height are fitted separately because the ecliptic is foreshortened —
+    // sizing off min(w, h) throws away most of the horizontal room.
+    const reach = Math.pow(30, FALLOFF) + 1;
+    const unit = Math.min(
+      ((w / 2) * 0.92) / reach,
+      ((h / 2) * 0.92) / (reach * SQUASH),
+    );
+
+    const project = (p: { x: number; y: number; z: number }): [number, number] => {
+      const r = Math.hypot(p.x, p.y);
+      const theta = Math.atan2(p.y, p.x);
+      const R = unit * Math.pow(r, FALLOFF);
+      return [R * Math.cos(theta), R * Math.sin(theta) * SQUASH + p.z * unit * 0.5];
+    };
+
+    // Camera locked to Earth: the whole system is drawn in Earth's frame, so
+    // scrubbing the year swings the Sun around a fixed Earth.
+    const earth = eclipticOf(Body.Earth, when);
+    const [ex, ey] = project(earth);
+    const cx = w / 2 - ex;
+    const cy = h / 2 - ey;
+
+    const sunX = cx;
+    const sunY = cy;
+
+    // Orbit rings, drawn in the same compressed space so they stay true circles.
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.scale(1, SQUASH);
+    for (const planet of PLANETS) {
+      const p = eclipticOf(planet.body, when);
+      const R = unit * Math.pow(Math.hypot(p.x, p.y), FALLOFF);
+      ctx.strokeStyle = planet.body === Body.Earth
+        ? 'rgba(160,200,255,0.30)'
+        : 'rgba(150,170,200,0.11)';
+      ctx.lineWidth = planet.body === Body.Earth ? 1.1 : 0.8;
+      ctx.beginPath();
+      ctx.arc(0, 0, R, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // Sun.
+    const glow = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, 110);
+    glow.addColorStop(0, 'rgba(255,238,190,0.80)');
+    glow.addColorStop(0.06, 'rgba(255,214,120,0.40)');
+    glow.addColorStop(0.3, 'rgba(255,170,60,0.10)');
+    glow.addColorStop(1, 'rgba(255,150,40,0)');
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(sunX, sunY, 110, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalCompositeOperation = 'source-over';
+
+    ctx.fillStyle = '#FFF4D6';
+    ctx.beginPath();
+    ctx.arc(sunX, sunY, 11, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Planets, far to near so nearer bodies overlap correctly.
+    const drawn = PLANETS
+      .map((planet) => {
+        const p = eclipticOf(planet.body, when);
+        const [px, py] = project(p);
+        return { planet, x: cx + px, y: cy + py, depth: p.y };
+      })
+      .sort((a, b) => a.depth - b.depth);
+
+    for (const { planet, x, y } of drawn) {
+      if (planet.ring) rings(ctx, x, y, planet.size, planet.lit);
+      sphere(ctx, x, y, planet.size, planet.lit, planet.dark, sunX, sunY);
+    }
+
+    // Earth is the locked body: give it a soft halo so it reads as the anchor.
+    const halo = ctx.createRadialGradient(w / 2, h / 2, 6, w / 2, h / 2, 34);
+    halo.addColorStop(0, 'rgba(150,200,255,0.22)');
+    halo.addColorStop(1, 'rgba(150,200,255,0)');
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.fillStyle = halo;
+    ctx.beginPath();
+    ctx.arc(w / 2, h / 2, 34, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  function setup(): void {
+    canvas = document.querySelector<HTMLCanvasElement>('[data-solar]');
+    if (!canvas) return;
+    ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    resize();
+    draw();
+
+    if (wired) return;
+    wired = true;
+
+    window.addEventListener('resize', () => { resize(); draw(); });
+    document.addEventListener('timeline:day', (event) => {
+      const next = (event as CustomEvent<{ day: number }>).detail?.day;
+      if (typeof next !== 'number' || next === day) return;
+      day = next;
+      draw();
+    });
+  }
+
+  document.addEventListener('astro:page-load', setup);
+</script>
