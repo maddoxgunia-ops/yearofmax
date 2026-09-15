@@ -45,7 +45,13 @@
     Body, Ecliptic, Equator, HelioVector, MakeTime, Observer, SiderealTime,
   } from 'astronomy-engine';
 
+  // The #include lines pull in three's logarithmic depth support. Built-in
+  // materials get it injected automatically; a custom ShaderMaterial does not,
+  // and without it this mesh writes depth on a different scale from everything
+  // else — which is why Saturn, nine AU away, drew on top of Earth.
   const SURFACE_VERT = `
+    #include <common>
+    #include <logdepthbuf_pars_vertex>
     varying vec2 vUv;
     varying vec3 vNormal;
     varying vec3 vView;
@@ -55,10 +61,13 @@
       vec4 world = modelMatrix * vec4(position, 1.0);
       vView = normalize(cameraPosition - world.xyz);
       gl_Position = projectionMatrix * viewMatrix * world;
+      #include <logdepthbuf_vertex>
     }
   `;
 
   const SURFACE_FRAG = `
+    #include <common>
+    #include <logdepthbuf_pars_fragment>
     uniform sampler2D dayMap;
     uniform sampler2D nightMap;
     uniform sampler2D cloudMap;
@@ -70,6 +79,7 @@
     varying vec3 vView;
 
     void main() {
+      #include <logdepthbuf_fragment>
       vec3 n = normalize(vNormal);
       vec3 s = normalize(sunDir);
 
@@ -101,10 +111,13 @@
   `;
 
   const AIR_FRAG = `
+    #include <common>
+    #include <logdepthbuf_pars_fragment>
     uniform vec3 sunDir;
     varying vec3 vNormal;
     varying vec3 vView;
     void main() {
+      #include <logdepthbuf_fragment>
       vec3 n = normalize(vNormal);
       float rim = pow(1.0 - abs(dot(n, vView)), 3.4);
       float lit = smoothstep(-0.45, 0.55, dot(n, normalize(sunDir)));
@@ -116,8 +129,8 @@
   const HIT_PX = 26;
   /** Meteors on screen at once, and the gap between them in seconds. */
   const METEORS = 3;
-  const METEOR_GAP: [number, number] = [2.5, 9];
-  const METEOR_LIFE = 1.1;
+  const METEOR_GAP: [number, number] = [11, 34];
+  const METEOR_LIFE = 2.4;
 
   /** Roll of the ecliptic across the frame, radians. */
   const ECLIPTIC_ROLL = 0.42;
@@ -148,8 +161,27 @@
   const SUN_RADIUS = 0.12;
 
   /** How far off Earth the camera floats, in AU. Earth's radius is 4.26e-5. */
-  const CAMERA_OFF = 0.00026;
-  const EARTH_RADIUS = 0.0000426;
+  /**
+   * How far the camera rises out of the ecliptic, in AU.
+   *
+   * Strictly, a camera at Earth is *in* the plane and every orbit collapses to
+   * a line — which is exactly why the zodiac is a band. Lifting clear of it is
+   * the one deliberate departure from the real vantage, and it is what turns
+   * the orbits into open ellipses.
+   */
+  const CAMERA_LIFT = 0.42;
+  /** Pull back along the Sun line, in AU. */
+  const CAMERA_BACK = 0.30;
+
+  /**
+   * Earth is drawn as a foreground body a fixed distance from the camera
+   * rather than at its true size and place. At this lift it would otherwise be
+   * a tenth of a pixel. Distances and positions of everything else stay real.
+   */
+  const EARTH_AT = 0.02;
+  const EARTH_RADIUS = EARTH_AT * 0.33;
+  const EARTH_SIDE = 0.50;
+  const EARTH_RISE = 0.08;
 
   /** The main belt really does sit between roughly 2.1 and 3.4 AU. */
   const BELT_INNER = 2.1;
@@ -279,9 +311,7 @@
     // Taking the Sun's real declination is what puts the seasons in: it swings
     // +/-23.4 degrees across the year on its own. Tilting the globe instead
     // would have thrown it out of line with the celestial pole.
-    // With the Sun at the origin, the lighting direction is simply the way
-    // from Earth back to it. No frames to reconcile.
-    sunDir.copy(helioOf3(Body.Earth, when)).negate().normalize();
+    // sunDir is set in placeEarth, from where the globe actually ends up.
 
     // Everything is placed at its true heliocentric position, in AU, with the
     // Sun at the origin. The camera floats just off Earth and looks sunward,
@@ -293,20 +323,12 @@
       // Offset sideways from Earth so the globe sits in frame rather than
       // filling it, then point the camera at the Sun.
       const outward = home.clone().normalize();
-      // Perpendicular within the ecliptic, not across it. Crossing with the
-      // z axis gives a near-vertical vector here, because Earth happens to lie
-      // close to it — which shoved Earth off the top of the frame.
-      const side = new Vector3().crossVectors(outward, new Vector3(0, 1, 0)).normalize();
-      // Weighted along the Sun line rather than across it. Offsetting
-      // sideways put Earth 72 degrees off axis against a 23 degree half
-      // field — completely out of frame. This lands it around 25 degrees out
-      // with an 8 degree radius, so it sits half in shot at the edge.
       cameraBase.copy(home)
-        .addScaledVector(outward, CAMERA_OFF * 1.0)
-        .addScaledVector(side, CAMERA_OFF * 0.42)
-        .add(new Vector3(0, CAMERA_OFF * 0.22, 0));
+        .addScaledVector(outward, CAMERA_BACK)
+        .add(new Vector3(0, CAMERA_LIFT, 0));
       camera.position.copy(cameraBase);
       camera.lookAt(0, 0, 0);
+      placeEarth();
       // Billboard the corona: the camera walks right round the Sun over a
       // year, so a fixed orientation shows the plane edge-on half the time.
       sunGlow?.lookAt(camera.position);
@@ -327,8 +349,6 @@
       mesh.scale.setScalar(radius / planet.size);
       mesh.rotation.y += 0.004;
     }
-
-    if (earthPivot) earthPivot.position.copy(home);
 
     baseSpin = (SiderealTime(MakeTime(when)) / 24) * Math.PI * 2;
   }
@@ -556,7 +576,7 @@
       }
 
       const head = m.at;
-      const tail = Math.max(0, m.at - 0.16);
+      const tail = Math.max(0, m.at - 0.22);
       const pos = m.line.geometry.getAttribute('position');
       const a = m.from.clone().lerp(m.to, tail);
       const b = m.from.clone().lerp(m.to, head);
@@ -565,8 +585,31 @@
       pos.needsUpdate = true;
 
       // Bright as it enters, gone by the end of the streak.
-      (m.line.material as LineBasicMaterial).opacity = Math.sin(m.at * Math.PI) * 0.9;
+      // Rises quickly, falls away slowly, rather than a symmetric blink.
+      const fade = m.at < 0.18 ? m.at / 0.18 : Math.pow(1 - (m.at - 0.18) / 0.82, 1.7);
+      (m.line.material as LineBasicMaterial).opacity = fade * 0.9;
     }
+  }
+
+  /**
+   * Hangs the globe off the camera: forward a fixed distance, out to one side
+   * and raised. Far nearer than anything else in the scene, so it occludes
+   * correctly.
+   */
+  function placeEarth(): void {
+    if (!camera || !earthPivot || !sunDir) return;
+
+    const forward = new Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+    const right = new Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+    const up = new Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
+
+    earthPivot.position.copy(camera.position)
+      .addScaledVector(forward, EARTH_AT)
+      .addScaledVector(right, EARTH_AT * EARTH_SIDE)
+      .addScaledVector(up, EARTH_AT * EARTH_RISE);
+
+    // Lit from wherever the Sun actually is relative to where it now sits.
+    sunDir.copy(earthPivot.position).negate().normalize();
   }
 
   function size(): void {
@@ -596,12 +639,13 @@
     // A slow wander on two incommensurate frequencies, so it never settles
     // into an obvious loop.
     if (camera) {
-      const wander = CAMERA_OFF * SHAKE;
+      const wander = CAMERA_LIFT * SHAKE * 0.02;
       camera.position.copy(cameraBase);
       camera.position.x += Math.sin(elapsed * 0.19) * wander + Math.sin(elapsed * 0.11) * wander * 0.6;
       camera.position.y += Math.cos(elapsed * 0.13) * wander * 0.7;
       camera.lookAt(0, 0, 0);
       camera.rotateZ(Math.sin(elapsed * 0.07) * 0.004);
+      placeEarth();
       sunGlow?.lookAt(camera.position);
       if (sky) sky.position.copy(camera.position);
     }
@@ -721,13 +765,15 @@
         transparent: true,
         blending: AdditiveBlending,
         depthWrite: false,
-        depthTest: false,
+        // Depth testing must stay on. Transparent objects are drawn after all
+        // opaque ones, so with it off the corona painted straight over Earth
+        // even though Earth is a hundredth of an AU away and the Sun is one.
+        depthTest: true,
       }),
     );
-    // Counter-rotates the system tilt so the glow faces the camera rather than
-    // lying flat in the orbital plane.
+    // Billboarded toward the camera rather than lying flat in the plane.
     sunGlow = glow;
-    glow.renderOrder = -1;
+
     sunMesh.add(glow);
 
     for (const planet of PLANETS) {

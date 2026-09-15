@@ -32,13 +32,15 @@ const TEXTURES = [
   { src: 'earth_specular_2048.jpg', out: 'water.webp', width: 1024, quality: 68 },
   // Terrain relief.
   { src: 'earth_normal_2048.jpg', out: 'normal.webp', width: 2048, quality: 78 },
-  // The sky. Half the source resolution: most of it sits behind the globe or
-  // the interface, and 4096 costs 787 KB against 177 KB for 2048.
+  // The sky, at full 8K. The sphere is magnified hard at a 46 degree field:
+  // only 46/360 of the map is on screen at once, so 2048 put barely 260
+  // texels across 800 pixels and looked like mush. 8192 gives 1047 — finally
+  // over 1:1. It is the single heaviest asset here and knowingly so.
   {
-    url: 'https://svs.gsfc.nasa.gov/vis/a000000/a003800/a003895/starmap_4k.jpg',
+    url: 'https://svs.gsfc.nasa.gov/vis/a000000/a003800/a003895/starmap_8k.jpg',
     out: 'starmap.webp',
-    width: 2048,
-    quality: 76,
+    width: 8192,
+    quality: 58,
   },
 ];
 
