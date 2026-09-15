@@ -35,7 +35,8 @@
   import {
     AdditiveBlending, BackSide, BufferGeometry, Float32BufferAttribute, Group,
     Line, LineBasicMaterial, Matrix4, Mesh, MeshBasicMaterial, PerspectiveCamera,
-    CanvasTexture, DoubleSide, PlaneGeometry, Quaternion, RingGeometry, Scene,
+    CanvasTexture, DoubleSide, PlaneGeometry, Points, PointsMaterial, Quaternion,
+    RingGeometry, Scene,
     ShaderMaterial,
     SphereGeometry, SRGBColorSpace, Vector2,
     TextureLoader, Vector3, WebGLRenderer,
@@ -120,18 +121,41 @@
 
   /** Roll of the ecliptic across the frame, radians. */
   const ECLIPTIC_ROLL = 0.42;
-  /** Camera drift. Small enough to read as breathing, not as motion. */
-  const SHAKE = 0.04;
+  /** Camera drift, as a fraction of the offset from Earth. Scene units are
+   *  AU now, so an absolute figure here would fling the camera at the Sun. */
+  const SHAKE = 0.06;
   /** Drift of the cloud deck, in texture widths per second. */
   const CLOUD_DRIFT = 0.0022;
 
-  /** Where the system sits in front of the camera, and how big. */
-  const SYSTEM_AT = new Vector3(0, 0.55, -14);
-  /** Radial compression. Linear puts Mercury inside the Sun and Neptune off-screen. */
-  const FALLOFF = 0.42;
-  const SYSTEM_REACH = 6.1;
-  /** Tilt of the orbital plane away from face-on. */
-  const SYSTEM_TILT = -1.02;
+  // Scene units are astronomical units. Distances are the real ones, so the
+  // camera sitting at Earth genuinely cannot see an outer planet except when
+  // it is near conjunction — behind the Sun.
+  //
+  // Sizes cannot be real as well. From here the Sun is 954 arcsec across and
+  // Jupiter is 16: one exaggeration factor for both puts the Sun at 90px and
+  // Jupiter at 1.5. So apparent size is made to fall off with the square root
+  // of distance rather than linearly — far things still read as far, without
+  // vanishing.
+  const SIZE_AT_5AU: Partial<Record<Body, number>> = {
+    [Body.Mercury]: 0.045,
+    [Body.Venus]: 0.070,
+    [Body.Mars]: 0.055,
+    [Body.Jupiter]: 0.160,
+    [Body.Saturn]: 0.140,
+    [Body.Uranus]: 0.090,
+    [Body.Neptune]: 0.085,
+  };
+  const SUN_RADIUS = 0.12;
+
+  /** How far off Earth the camera floats, in AU. Earth's radius is 4.26e-5. */
+  const CAMERA_OFF = 0.00026;
+  const EARTH_RADIUS = 0.0000426;
+
+  /** The main belt really does sit between roughly 2.1 and 3.4 AU. */
+  const BELT_INNER = 2.1;
+  const BELT_OUTER = 3.4;
+  const BELT_COUNT = 2200;
+  const BELT_THICKNESS = 0.14;
 
   /** Sky radius. Everything distant lives just inside it. */
   const SKY = 90;
@@ -184,6 +208,10 @@
   let system: Group | null = null;
   /** Spun so Earth’s side of the orbit always faces the viewer. */
   let systemSpin: Group | null = null;
+  let belt: Points | null = null;
+  let sunGlow: Mesh | null = null;
+  /** Where the camera sits before drift is added. */
+  const cameraBase = new Vector3();
   let label: HTMLElement | null = null;
   const pointer = new Vector2(-9999, -9999);
   const projected = new Vector3();
@@ -251,38 +279,56 @@
     // Taking the Sun's real declination is what puts the seasons in: it swings
     // +/-23.4 degrees across the year on its own. Tilting the globe instead
     // would have thrown it out of line with the celestial pole.
-    const sun = equatorOf(Body.Sun, when);
-    const sunLocal = direction(sun.ra, sun.dec);
-    // The Sun mesh is pinned at the centre of the system and never moves — it
-    // is what everything else is arranged around. Only the lighting direction
-    // comes from the real sky.
-    sunDir.copy(sunLocal);
-    if (sky) sunDir.applyQuaternion(sky.quaternion);
-    if (sky && earthPivot) earthPivot.quaternion.copy(sky.quaternion);
+    // With the Sun at the origin, the lighting direction is simply the way
+    // from Earth back to it. No frames to reconcile.
+    sunDir.copy(helioOf3(Body.Earth, when)).negate().normalize();
 
-    // Earth's own place in the system is brought round to the near side of
-    // the Sun — the side the camera is on. Everything outside Earth's orbit is
-    // by definition farther from the Sun than the camera, so once Earth is
-    // anchored here the outer planets can only fall beyond the Sun or off to
-    // the sides. They can never come between the camera and it.
-    if (systemSpin) {
-      const home = helioOf(Body.Earth, when);
-      systemSpin.rotation.z = -Math.atan2(home.y, home.x) - Math.PI / 2;
+    // Everything is placed at its true heliocentric position, in AU, with the
+    // Sun at the origin. The camera floats just off Earth and looks sunward,
+    // so what falls inside the field of view is decided by real geometry
+    // rather than by arranging things to be seen.
+    const home = helioOf3(Body.Earth, when);
+
+    if (camera) {
+      // Offset sideways from Earth so the globe sits in frame rather than
+      // filling it, then point the camera at the Sun.
+      const outward = home.clone().normalize();
+      // Perpendicular within the ecliptic, not across it. Crossing with the
+      // z axis gives a near-vertical vector here, because Earth happens to lie
+      // close to it — which shoved Earth off the top of the frame.
+      const side = new Vector3().crossVectors(outward, new Vector3(0, 1, 0)).normalize();
+      // Weighted along the Sun line rather than across it. Offsetting
+      // sideways put Earth 72 degrees off axis against a 23 degree half
+      // field — completely out of frame. This lands it around 25 degrees out
+      // with an 8 degree radius, so it sits half in shot at the edge.
+      cameraBase.copy(home)
+        .addScaledVector(outward, CAMERA_OFF * 1.0)
+        .addScaledVector(side, CAMERA_OFF * 0.42)
+        .add(new Vector3(0, CAMERA_OFF * 0.22, 0));
+      camera.position.copy(cameraBase);
+      camera.lookAt(0, 0, 0);
+      // Billboard the corona: the camera walks right round the Sun over a
+      // year, so a fixed orientation shows the plane edge-on half the time.
+      sunGlow?.lookAt(camera.position);
+      if (sky) sky.position.copy(camera.position);
     }
 
-    // Planets sit at their real heliocentric angle and distance around the
-    // Sun, not at their direction in the sky. With the Sun pinned to the
-    // centre of frame, sky directions would bunch every planet on top of it —
-    // only Mercury and Venus are ever near the Sun from here.
     for (const planet of PLANETS) {
       const mesh = planetMeshes.get(planet.body);
       if (!mesh) continue;
-      const pos = helioOf(planet.body, when);
-      const radius = orbitRadius(Math.hypot(pos.x, pos.y));
-      const angle = Math.atan2(pos.y, pos.x);
-      mesh.position.set(Math.cos(angle) * radius, Math.sin(angle) * radius, 0);
-      mesh.rotation.y += 0.004; // slow spin, so the design reads as a surface
+      const at = helioOf3(planet.body, when);
+      mesh.position.copy(at);
+
+      // Apparent size falls off with the square root of distance, so Neptune
+      // at 29 AU is still a visible speck rather than a tenth of a pixel.
+      const dist = camera ? at.distanceTo(camera.position) : 1;
+      const base = SIZE_AT_5AU[planet.body] ?? 0.08;
+      const radius = base * Math.sqrt(Math.max(dist, 0.05) / 5);
+      mesh.scale.setScalar(radius / planet.size);
+      mesh.rotation.y += 0.004;
     }
+
+    if (earthPivot) earthPivot.position.copy(home);
 
     baseSpin = (SiderealTime(MakeTime(when)) / 24) * Math.PI * 2;
   }
@@ -431,10 +477,11 @@
     return new CanvasTexture(c);
   }
 
-  /** Heliocentric ecliptic position, in AU. */
-  function helioOf(body: Body, when: Date): { x: number; y: number } {
+  /** Heliocentric ecliptic position, in AU, all three axes. */
+  function helioOf3(body: Body, when: Date): Vector3 {
     const e = Ecliptic(HelioVector(body, MakeTime(when)));
-    return { x: e.vec.x, y: e.vec.y };
+    // Ecliptic z becomes scene y, so the orbital plane lies flat.
+    return new Vector3(e.vec.x, e.vec.z, e.vec.y);
   }
 
   /** Compressed radius for an orbit, in scene units. */
@@ -549,9 +596,14 @@
     // A slow wander on two incommensurate frequencies, so it never settles
     // into an obvious loop.
     if (camera) {
-      camera.position.x = Math.sin(elapsed * 0.19) * SHAKE + Math.sin(elapsed * 0.11) * SHAKE * 0.6;
-      camera.position.y = Math.cos(elapsed * 0.13) * SHAKE * 0.7;
-      camera.rotation.z = Math.sin(elapsed * 0.07) * 0.004;
+      const wander = CAMERA_OFF * SHAKE;
+      camera.position.copy(cameraBase);
+      camera.position.x += Math.sin(elapsed * 0.19) * wander + Math.sin(elapsed * 0.11) * wander * 0.6;
+      camera.position.y += Math.cos(elapsed * 0.13) * wander * 0.7;
+      camera.lookAt(0, 0, 0);
+      camera.rotateZ(Math.sin(elapsed * 0.07) * 0.004);
+      sunGlow?.lookAt(camera.position);
+      if (sky) sky.position.copy(camera.position);
     }
 
     hover();
@@ -564,7 +616,14 @@
 
     let gl: WebGLRenderer;
     try {
-      gl = new WebGLRenderer({ alpha: true, antialias: true, powerPreference: 'low-power' });
+      gl = new WebGLRenderer({
+        alpha: true,
+        antialias: true,
+        powerPreference: 'low-power',
+        // Earth's radius is 4.3e-5 AU and Neptune is 30 AU out: a seven-order
+        // depth range that a normal buffer cannot resolve.
+        logarithmicDepthBuffer: true,
+      });
     } catch {
       return; // No WebGL: leave the page as it is.
     }
@@ -575,8 +634,7 @@
     host.appendChild(renderer.domElement);
 
     scene = new Scene();
-    camera = new PerspectiveCamera(46, 1, 0.1, 400);
-    camera.position.set(0, 0, 2.5);
+    camera = new PerspectiveCamera(46, 1, 0.000004, 400);
 
     sunDir = new Vector3(1, 0, 0);
 
@@ -592,7 +650,7 @@
     scene.add(sky);
 
     const stars = new Mesh(
-      new SphereGeometry(SKY, 64, 32),
+      new SphereGeometry(140, 64, 32),
       // Knocked well back: at full strength the map's diffuse galactic light
       // greys the whole frame and the globe stops being the subject.
       new MeshBasicMaterial({
@@ -620,18 +678,15 @@
     const surface = surfaceMat;
 
     earthPivot = new Group();
-    // Lower right, part of it out of frame. Keeps the bottom-left corner
-    // clear for the day readout and leaves the sky open for the paths.
-    earthPivot.position.set(0.95, -1.2, 0);
     scene.add(earthPivot);
 
-    globe = new Mesh(new SphereGeometry(1, 96, 96), surface);
+    globe = new Mesh(new SphereGeometry(EARTH_RADIUS, 96, 96), surface);
     // No axial tilt here: the spin axis IS the celestial pole. The pivot
     // carries the sky's rotation so the two stay aligned.
     earthPivot.add(globe);
 
     const air = new Mesh(
-      new SphereGeometry(1.035, 64, 64),
+      new SphereGeometry(EARTH_RADIUS * 1.035, 64, 64),
       new ShaderMaterial({
         uniforms: { sunDir: { value: sunDir } },
         vertexShader: SURFACE_VERT,
@@ -647,24 +702,20 @@
     // --- sun and planets ---------------------------------------------------
     // A flat disc laid out in front of the camera and tilted, rather than
     // anything on the celestial sphere. The Sun is the fixed centre of it.
+    // No tilt and no spin any more: the Sun is simply at the origin and
+    // everything sits where it really is, in AU.
     system = new Group();
-    system.position.copy(SYSTEM_AT);
-    system.rotation.x = SYSTEM_TILT;
     scene.add(system);
-
-    // Separate child for the in-plane rotation. Setting both on one object
-    // would make the result depend on Euler order.
-    systemSpin = new Group();
-    system.add(systemSpin);
+    systemSpin = system;
 
     sunMesh = new Mesh(
-      new SphereGeometry(0.92, 48, 48),
+      new SphereGeometry(SUN_RADIUS, 48, 48),
       new MeshBasicMaterial({ color: 0xfff3d2 }),
     );
     systemSpin.add(sunMesh);
 
     const glow = new Mesh(
-      new PlaneGeometry(11, 11),
+      new PlaneGeometry(SUN_RADIUS * 13, SUN_RADIUS * 13),
       new MeshBasicMaterial({
         map: glowTexture(),
         transparent: true,
@@ -675,7 +726,7 @@
     );
     // Counter-rotates the system tilt so the glow faces the camera rather than
     // lying flat in the orbital plane.
-    glow.rotation.x = -SYSTEM_TILT;
+    sunGlow = glow;
     glow.renderOrder = -1;
     sunMesh.add(glow);
 
@@ -704,13 +755,13 @@
         mesh.add(ring);
       }
 
-      // Orbit as a line, a true circle at the compressed radius.
-      const au = Math.hypot(helioOf(planet.body, dateOfDay(exact)).x, helioOf(planet.body, dateOfDay(exact)).y);
-      const r = orbitRadius(au);
+      // Orbit as a line, a true circle at the planet's real distance.
+      const here = helioOf3(planet.body, dateOfDay(exact));
+      const r = Math.hypot(here.x, here.z);
       const points: number[] = [];
-      for (let i = 0; i <= 128; i++) {
-        const a = (i / 128) * Math.PI * 2;
-        points.push(Math.cos(a) * r, Math.sin(a) * r, 0);
+      for (let i = 0; i <= 256; i++) {
+        const a = (i / 256) * Math.PI * 2;
+        points.push(Math.cos(a) * r, 0, Math.sin(a) * r);
       }
       const geometry = new BufferGeometry();
       geometry.setAttribute('position', new Float32BufferAttribute(points, 3));
@@ -725,11 +776,10 @@
     // Earth's own orbit, drawn brighter: it is the line everything else is
     // outside of, and the reason the outer planets sit where they do.
     {
-      const r = orbitRadius(1);
       const points: number[] = [];
-      for (let i = 0; i <= 128; i++) {
-        const a = (i / 128) * Math.PI * 2;
-        points.push(Math.cos(a) * r, Math.sin(a) * r, 0);
+      for (let i = 0; i <= 256; i++) {
+        const a = (i / 256) * Math.PI * 2;
+        points.push(Math.cos(a), 0, Math.sin(a));
       }
       const geometry = new BufferGeometry();
       geometry.setAttribute('position', new Float32BufferAttribute(points, 3));
@@ -739,6 +789,37 @@
         opacity: 0.34,
         depthWrite: false,
       })));
+    }
+
+    // --- the main belt -----------------------------------------------------
+    // Between Mars and Jupiter, where it actually is. Scattered rather than a
+    // clean annulus: the real belt is neither uniform nor flat.
+    {
+      const coords: number[] = [];
+      let seed = 4919;
+      const rnd = (): number => {
+        seed = (seed * 16807) % 2147483647;
+        return seed / 2147483647;
+      };
+      for (let i = 0; i < BELT_COUNT; i++) {
+        // Biased toward the middle of the belt.
+        const t = (rnd() + rnd()) / 2;
+        const radius = BELT_INNER + t * (BELT_OUTER - BELT_INNER);
+        const angle = rnd() * Math.PI * 2;
+        const lift = (rnd() - 0.5) * BELT_THICKNESS;
+        coords.push(Math.cos(angle) * radius, lift, Math.sin(angle) * radius);
+      }
+      const geometry = new BufferGeometry();
+      geometry.setAttribute('position', new Float32BufferAttribute(coords, 3));
+      belt = new Points(geometry, new PointsMaterial({
+        color: 0xbdb3a4,
+        size: 0.012,
+        sizeAttenuation: true,
+        transparent: true,
+        opacity: 0.75,
+        depthWrite: false,
+      }));
+      systemSpin.add(belt);
     }
 
     // --- meteors -----------------------------------------------------------
