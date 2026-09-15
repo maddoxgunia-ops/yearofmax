@@ -40,20 +40,18 @@ const dayOfYear = Math.round((today - yearStart) / DAY_MS) + 1;
 <script>
   const DAY_MS = 86_400_000;
 
-  /** Static build: correct the build-time counter against the visitor's date. */
+  /**
+   * Only the year length is corrected here. The day number itself is driven by
+   * the timeline, which owns it — see Timeline.astro.
+   */
   function refresh(): void {
-    const counter = document.querySelector<HTMLElement>('[data-counter]');
     const total = document.querySelector<HTMLElement>('[data-counter-total]');
-    if (!counter) return;
+    if (!total) return;
 
     const now = new Date();
     const year = now.getUTCFullYear();
     const yearStart = Date.UTC(year, 0, 1);
-    const totalDays = Math.round((Date.UTC(year + 1, 0, 1) - yearStart) / DAY_MS);
-    const today = Date.UTC(year, now.getUTCMonth(), now.getUTCDate());
-
-    counter.textContent = String(Math.round((today - yearStart) / DAY_MS) + 1);
-    if (total) total.textContent = String(totalDays);
+    total.textContent = String(Math.round((Date.UTC(year + 1, 0, 1) - yearStart) / DAY_MS));
   }
 
   document.addEventListener('astro:page-load', refresh);

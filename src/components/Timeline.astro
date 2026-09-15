@@ -16,7 +16,7 @@ const today = Date.UTC(year, now.getUTCMonth(), now.getUTCDate());
 const dayOfYear = Math.round((today - yearStart) / DAY_MS) + 1;
 
 /** Width of one day. The year is deliberately wider than any viewport. */
-const DAY = 14;
+const DAY = 28;
 
 const months = MONTHS.map((label, index) => ({
   label,
@@ -125,8 +125,11 @@ const months = MONTHS.map((label, index) => ({
     const track = document.querySelector<HTMLElement>('[data-track]');
     if (!root || !track) return;
 
-    const day = Number(root.dataset.day ?? 14);
+    const day = Number(root.dataset.day ?? 28);
     const DAY_MS = 86_400_000;
+    // The big number is a readout of where the timeline is parked, not a
+    // fixed "today" — scrubbing the year scrubs the count with it.
+    const counter = document.querySelector<HTMLElement>('[data-counter]');
 
     // Correct the build-time position against the visitor's own date.
     const now = new Date();
@@ -140,16 +143,29 @@ const months = MONTHS.map((label, index) => ({
     const marker = document.querySelector<HTMLElement>('[data-now]');
     if (marker) marker.style.left = (dayOfYear - 1) * day + 'px';
 
-    const span = (): number => Math.max(0, total * day - window.innerWidth);
-    // Open on today, centred.
-    let offset = Math.min(span(), Math.max(0, (dayOfYear - 1) * day - window.innerWidth / 2));
+    const half = (): number => window.innerWidth / 2;
+    /** Offset that parks day `d` under the centre of the viewport. */
+    const offsetFor = (d: number): number => (d - 1) * day + day / 2 - half();
+
+    // Clamping to the track's own width would strand the first and last
+    // fortnight off-centre, so the count could never reach 1 or the 31st of
+    // December. The range is the first and last day instead, which lets the
+    // track overhang the viewport edges at either end of the year.
+    const minOffset = (): number => offsetFor(1);
+    const maxOffset = (): number => offsetFor(total);
+
+    let offset = offsetFor(dayOfYear);
 
     const draw = (): void => {
       track.style.transform = 'translate3d(' + -offset + 'px,0,0)';
+      if (!counter) return;
+      // Whichever day sits at the centre of the viewport is the one shown.
+      const centre = Math.round((offset + half() - day / 2) / day) + 1;
+      counter.textContent = String(Math.min(total, Math.max(1, centre)));
     };
 
     const pan = (delta: number): void => {
-      const next = Math.min(span(), Math.max(0, offset + delta));
+      const next = Math.min(maxOffset(), Math.max(minOffset(), offset + delta));
       if (Math.abs(next - offset) < MIN_DELTA) return;
       offset = next;
       draw();
