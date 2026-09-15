@@ -120,6 +120,8 @@
 
   /** Roll of the ecliptic across the frame, radians. */
   const ECLIPTIC_ROLL = 0.42;
+  /** Camera drift. Small enough to read as breathing, not as motion. */
+  const SHAKE = 0.04;
   /** Drift of the cloud deck, in texture widths per second. */
   const CLOUD_DRIFT = 0.0022;
 
@@ -180,6 +182,8 @@
   let surfaceMat: ShaderMaterial | null = null;
   /** The Sun and its planets, held flat and tilted in front of the camera. */
   let system: Group | null = null;
+  /** Spun so Earth’s side of the orbit always faces the viewer. */
+  let systemSpin: Group | null = null;
   let label: HTMLElement | null = null;
   const pointer = new Vector2(-9999, -9999);
   const projected = new Vector3();
@@ -255,6 +259,16 @@
     sunDir.copy(sunLocal);
     if (sky) sunDir.applyQuaternion(sky.quaternion);
     if (sky && earthPivot) earthPivot.quaternion.copy(sky.quaternion);
+
+    // Earth's own place in the system is brought round to the near side of
+    // the Sun — the side the camera is on. Everything outside Earth's orbit is
+    // by definition farther from the Sun than the camera, so once Earth is
+    // anchored here the outer planets can only fall beyond the Sun or off to
+    // the sides. They can never come between the camera and it.
+    if (systemSpin) {
+      const home = helioOf(Body.Earth, when);
+      systemSpin.rotation.z = -Math.atan2(home.y, home.x) - Math.PI / 2;
+    }
 
     // Planets sit at their real heliocentric angle and distance around the
     // Sun, not at their direction in the sky. With the Sun pinned to the
@@ -531,6 +545,15 @@
     // Clouds run slightly ahead of the ground beneath them.
     if (surfaceMat) surfaceMat.uniforms.cloudShift.value = elapsed * CLOUD_DRIFT;
     stepMeteors(1 / 60);
+
+    // A slow wander on two incommensurate frequencies, so it never settles
+    // into an obvious loop.
+    if (camera) {
+      camera.position.x = Math.sin(elapsed * 0.19) * SHAKE + Math.sin(elapsed * 0.11) * SHAKE * 0.6;
+      camera.position.y = Math.cos(elapsed * 0.13) * SHAKE * 0.7;
+      camera.rotation.z = Math.sin(elapsed * 0.07) * 0.004;
+    }
+
     hover();
     render();
   }
@@ -629,11 +652,16 @@
     system.rotation.x = SYSTEM_TILT;
     scene.add(system);
 
+    // Separate child for the in-plane rotation. Setting both on one object
+    // would make the result depend on Euler order.
+    systemSpin = new Group();
+    system.add(systemSpin);
+
     sunMesh = new Mesh(
       new SphereGeometry(0.92, 48, 48),
       new MeshBasicMaterial({ color: 0xfff3d2 }),
     );
-    system.add(sunMesh);
+    systemSpin.add(sunMesh);
 
     const glow = new Mesh(
       new PlaneGeometry(11, 11),
@@ -657,7 +685,7 @@
         new MeshBasicMaterial({ map: surfaceOf(planet) }),
       );
       planetMeshes.set(planet.body, mesh);
-      system.add(mesh);
+      systemSpin.add(mesh);
 
       if (planet.ring) {
         const ring = new Mesh(
@@ -686,10 +714,29 @@
       }
       const geometry = new BufferGeometry();
       geometry.setAttribute('position', new Float32BufferAttribute(points, 3));
-      system.add(new Line(geometry, new LineBasicMaterial({
+      systemSpin.add(new Line(geometry, new LineBasicMaterial({
         color: 0x8fa4c4,
         transparent: true,
         opacity: 0.16,
+        depthWrite: false,
+      })));
+    }
+
+    // Earth's own orbit, drawn brighter: it is the line everything else is
+    // outside of, and the reason the outer planets sit where they do.
+    {
+      const r = orbitRadius(1);
+      const points: number[] = [];
+      for (let i = 0; i <= 128; i++) {
+        const a = (i / 128) * Math.PI * 2;
+        points.push(Math.cos(a) * r, Math.sin(a) * r, 0);
+      }
+      const geometry = new BufferGeometry();
+      geometry.setAttribute('position', new Float32BufferAttribute(points, 3));
+      systemSpin.add(new Line(geometry, new LineBasicMaterial({
+        color: 0x9ec4ff,
+        transparent: true,
+        opacity: 0.34,
         depthWrite: false,
       })));
     }
