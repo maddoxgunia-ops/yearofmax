@@ -13,7 +13,9 @@
     "images": "node scripts/images.mjs",
     "earth": "node scripts/earth-textures.mjs",
     "test:colour": "node scripts/colour-test.ts",
-    "astro": "astro"
+    "astro": "astro",
+    "test:units": "node scripts/units-test.ts",
+    "test:files": "node scripts/files-test.ts"
   },
   "dependencies": {
     "@astrojs/rss": "^4.0.19",

@@ -1,0 +1,508 @@
+---
+import Base from '../../layouts/Base.astro';
+import * as U from '../../scripts/tools/units';
+import { DATA_FORMATS, ENCODINGS, IMAGE_OUT } from '../../scripts/tools/files';
+
+// As with the colour tool, the page renders a real, complete state at build
+// time so it stands up with JavaScript off. The client script only writes into
+// nodes that already exist — it never builds structure, so the two cannot
+// drift apart.
+const START = '1 km to mi';
+const seed = U.resolve(START);
+const source = seed.source;
+const dim = source?.dim ?? [];
+
+const quantities = U.pickableQuantities();
+const units = U.unitsFor(dim, seed.sourceUnit ?? source ?? undefined);
+
+const rows = units.map((unit) => {
+  const result = source ? U.convert(seed.value, source, unit) : null;
+  return { unit, out: result ? U.format(result.value) : '' };
+});
+
+const value = seed.result ? U.format(seed.result.value) : '';
+const target = seed.targetUnit;
+const exact = seed.result?.exact ?? false;
+---
+
+<Base title="convert · yearofmax" description="">
+  <section class="tool" data-convert-tool data-start={START}>
+    <header class="tool__head">
+      <p class="tool__value counter" data-value>{value}</p>
+      <p class="tool__unit" data-target-name>{target?.name ?? ''}</p>
+
+      <p class="tool__formats" data-formats>
+        {seed.value} {source ? seed.sourceLabel : ''}
+        <span class="dot">·</span>{U.quantityName(dim)}
+        <span class="dot">·</span><span data-exact>{exact ? 'exact' : 'approximate'}</span>
+      </p>
+
+      <label class="field">
+        <span class="label">value</span>
+        <input type="text" value={START} spellcheck="false" autocomplete="off"
+               autocapitalize="off" data-input />
+      </label>
+      <p class="tool__error" data-error hidden></p>
+    </header>
+
+    <!-- measure -->
+    <section class="row">
+      <h2 class="row__name label">measure</h2>
+      <div class="row__body">
+        <div class="chips" data-quantities>
+          {quantities.map((q) => (
+            <button class="chip label" type="button" data-quantity={q.name}
+                    aria-pressed={U.sameDim(q.dim, dim) ? 'true' : 'false'}>{q.name}</button>
+          ))}
+        </div>
+      </div>
+    </section>
+
+    <!-- units -->
+    <section class="row">
+      <h2 class="row__name label">units</h2>
+      <div class="row__body">
+        <table class="units">
+          <tbody data-units>
+            {rows.map(({ unit, out }) => (
+              <tr data-unit={unit.id} data-symbol={unit.symbol}>
+                <th class="units__sym">{unit.symbol}</th>
+                <td class="units__name">
+                  {unit.name}{unit.group ? <span class="units__group label">{unit.group}</span> : null}
+                </td>
+                <td class="units__out" data-out>{out}</td>
+                <td class="units__act">
+                  <button class="act" type="button" data-pin={unit.id}>pin</button>
+                  <button class="act" type="button" data-copy={out}>copy</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- files -->
+    <section class="row">
+      <h2 class="row__name label">files</h2>
+      <div class="row__body">
+        <div class="drop" data-drop tabindex="0" role="button" aria-label="choose a file">
+          <input type="file" data-file hidden />
+          <span class="drop__name" data-file-name></span>
+          <span class="drop__meta label" data-file-meta></span>
+        </div>
+
+        <div class="targets" data-targets hidden>
+          <div class="targets__set" data-image-targets hidden>
+            {IMAGE_OUT.map((t) => (
+              <button class="act label" type="button" data-target={t.id} data-lossy={t.lossy ? 'yes' : 'no'}>{t.name}</button>
+            ))}
+          </div>
+          <div class="targets__set" data-data-targets hidden>
+            {DATA_FORMATS.filter((f) => f.write).map((t) => (
+              <button class="act label" type="button" data-target={t.id}>{t.name}</button>
+            ))}
+          </div>
+
+          <label class="slider" data-quality-wrap hidden>
+            <span class="label">quality</span>
+            <input type="range" min="10" max="100" value="90" data-quality />
+            <span class="slider__out" data-quality-out>90</span>
+          </label>
+
+          <label class="slider" data-fit-wrap hidden>
+            <span class="label">longest edge</span>
+            <input type="range" min="64" max="4096" step="64" value="4096" data-fit />
+            <span class="slider__out" data-fit-out></span>
+          </label>
+        </div>
+
+        <p class="drop__error" data-file-error hidden></p>
+        <a class="act download" data-download hidden download>download</a>
+      </div>
+    </section>
+
+    <!-- text -->
+    <section class="row">
+      <h2 class="row__name label">text</h2>
+      <div class="row__body">
+        <div class="pair">
+          <div class="pair__side">
+            <select class="select label" data-from>
+              <optgroup label="data">
+                {DATA_FORMATS.filter((f) => f.read).map((f) => (
+                  <option value={f.id} selected={f.id === 'json'}>{f.name}</option>
+                ))}
+              </optgroup>
+              <optgroup label="encoding">
+                {ENCODINGS.map((e) => <option value={e.id}>{e.name}</option>)}
+              </optgroup>
+            </select>
+            <textarea class="area" rows="9" spellcheck="false" data-text-in></textarea>
+          </div>
+
+          <div class="pair__mid">
+            <button class="act label" type="button" data-swap>swap</button>
+          </div>
+
+          <div class="pair__side">
+            <select class="select label" data-to>
+              <optgroup label="data">
+                {DATA_FORMATS.filter((f) => f.write).map((f) => (
+                  <option value={f.id} selected={f.id === 'csv'}>{f.name}</option>
+                ))}
+              </optgroup>
+              <optgroup label="encoding">
+                {ENCODINGS.map((e) => <option value={e.id}>{e.name}</option>)}
+              </optgroup>
+            </select>
+            <textarea class="area" rows="9" spellcheck="false" readonly data-text-out></textarea>
+            <div class="pair__acts">
+              <button class="act label" type="button" data-text-copy>copy</button>
+              <a class="act label" data-text-download hidden download>download</a>
+            </div>
+          </div>
+        </div>
+        <p class="tool__error" data-text-error hidden></p>
+      </div>
+    </section>
+  </section>
+</Base>
+
+<style>
+  .tool {
+    padding-top: 2rem;
+    padding-bottom: 4rem;
+  }
+
+  /* Values run far longer than a hex code, so this sits well below the
+     counter role's own size. */
+  .tool__value {
+    color: var(--ink);
+    font-size: clamp(34px, 9vw, 104px);
+    font-variant-numeric: tabular-nums;
+    min-height: 1em;
+    overflow-wrap: anywhere;
+  }
+
+  .tool__unit {
+    margin-top: 0.1rem;
+    color: var(--ink);
+    font-stretch: var(--wdth-narrow);
+    font-size: var(--size-heading);
+  }
+
+  .tool__formats {
+    margin-top: 0.5rem;
+    color: var(--graphite);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .dot {
+    padding: 0 0.5ch;
+  }
+
+  .tool__error {
+    margin-top: 0.7rem;
+    color: var(--signal);
+  }
+
+  .field {
+    display: flex;
+    align-items: baseline;
+    gap: 0.9rem;
+    margin-top: 1.6rem;
+    max-width: 40rem;
+  }
+
+  .field input {
+    flex: 1;
+    font: inherit;
+    font-family: var(--family);
+    font-size: var(--size-body);
+    padding: 0.45rem 0.6rem;
+    color: var(--ink);
+    background: none;
+    border: var(--hairline) solid var(--rule);
+  }
+
+  .field input:focus-visible,
+  .area:focus-visible,
+  .select:focus-visible {
+    outline: 2px solid var(--ink);
+    outline-offset: 1px;
+  }
+
+  .act {
+    border: 0;
+    background: none;
+    padding: 0;
+    color: var(--graphite);
+    cursor: pointer;
+    font: inherit;
+    font-stretch: var(--wdth-narrow);
+    font-size: var(--size-label);
+    letter-spacing: var(--track-label);
+    text-decoration: none;
+    transition: color 160ms;
+  }
+
+  .act:hover {
+    color: var(--ink);
+  }
+
+  /* rows ---------------------------------------------------------------- */
+
+  .row {
+    display: grid;
+    grid-template-columns: 9rem 1fr;
+    gap: 1.75rem;
+    padding: 2.25rem 0;
+    border-top: var(--hairline) solid var(--rule);
+    margin-top: 2.5rem;
+  }
+
+  .row + .row {
+    margin-top: 0;
+  }
+
+  .row__name {
+    color: var(--graphite);
+    padding-top: 0.2em;
+  }
+
+  /* chips ---------------------------------------------------------------- */
+
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 0.5rem;
+    max-width: 52rem;
+  }
+
+  .chip {
+    border: var(--hairline) solid var(--rule);
+    background: none;
+    color: var(--graphite);
+    padding: 0.3rem 0.6rem;
+    cursor: pointer;
+    font: inherit;
+    font-stretch: var(--wdth-narrow);
+    font-size: var(--size-label);
+    letter-spacing: var(--track-label);
+    transition: color 160ms, border-color 160ms;
+  }
+
+  .chip:hover {
+    color: var(--ink);
+    border-color: var(--ink);
+  }
+
+  .chip[aria-pressed='true'] {
+    color: var(--paper);
+    background: var(--ink);
+    border-color: var(--ink);
+  }
+
+  /* units ---------------------------------------------------------------- */
+
+  table {
+    border-collapse: collapse;
+    max-width: 46rem;
+    width: 100%;
+    font-variant-numeric: tabular-nums;
+  }
+
+  th, td {
+    text-align: left;
+    padding: 0.4rem 1rem 0.4rem 0;
+    border-bottom: var(--hairline) solid var(--rule);
+    font-weight: 400;
+    vertical-align: baseline;
+  }
+
+  .units__sym {
+    color: var(--ink);
+    width: 7rem;
+  }
+
+  .units__name {
+    color: var(--graphite);
+  }
+
+  .units__group {
+    margin-left: 0.6ch;
+    color: var(--rule);
+  }
+
+  .units__out {
+    color: var(--ink);
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  .units__act {
+    width: 5.5rem;
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  .units__act .act + .act {
+    margin-left: 0.8rem;
+  }
+
+  tr[data-pinned] .units__sym,
+  tr[data-pinned] .units__out {
+    color: var(--signal);
+  }
+
+  /* files ----------------------------------------------------------------- */
+
+  .drop {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 0.3rem;
+    min-height: 7rem;
+    padding: 1.25rem;
+    max-width: 46rem;
+    border: var(--hairline) dashed var(--rule);
+    cursor: pointer;
+    color: var(--graphite);
+    transition: border-color 160ms, color 160ms;
+  }
+
+  .drop:hover,
+  .drop[data-over] {
+    border-color: var(--ink);
+    color: var(--ink);
+  }
+
+  .drop__name {
+    color: var(--ink);
+  }
+
+  .targets {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.9rem 1.2rem;
+    margin-top: 1.1rem;
+    max-width: 46rem;
+  }
+
+  .targets__set {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.2rem;
+  }
+
+  .act[aria-pressed='true'] {
+    color: var(--signal);
+  }
+
+  .slider {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+  }
+
+  .slider input {
+    width: 8rem;
+    accent-color: var(--ink);
+  }
+
+  .slider__out {
+    color: var(--graphite);
+    font-variant-numeric: tabular-nums;
+    min-width: 4ch;
+  }
+
+  .drop__error {
+    margin-top: 0.8rem;
+    color: var(--signal);
+  }
+
+  .download {
+    display: inline-block;
+    margin-top: 1.1rem;
+    color: var(--ink);
+    border-bottom: var(--hairline) solid var(--ink);
+  }
+
+  /* text ------------------------------------------------------------------ */
+
+  .pair {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    gap: 0.9rem;
+    align-items: start;
+    max-width: 52rem;
+  }
+
+  .pair__side {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    min-width: 0;
+  }
+
+  .pair__mid {
+    padding-top: 0.5rem;
+  }
+
+  .pair__acts {
+    display: flex;
+    gap: 1rem;
+  }
+
+  .select {
+    font: inherit;
+    font-family: var(--family);
+    font-stretch: var(--wdth-narrow);
+    font-size: var(--size-label);
+    letter-spacing: var(--track-label);
+    color: var(--ink);
+    background: none;
+    border: var(--hairline) solid var(--rule);
+    padding: 0.3rem 0.4rem;
+  }
+
+  .area {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    tab-size: 2;
+    resize: vertical;
+    padding: 0.6rem;
+    color: var(--ink);
+    background: none;
+    border: var(--hairline) solid var(--rule);
+    width: 100%;
+  }
+
+  @media (max-width: 46rem) {
+    .row {
+      grid-template-columns: 1fr;
+      gap: 0.9rem;
+    }
+
+    .pair {
+      grid-template-columns: 1fr;
+    }
+
+    .units__act {
+      width: 4rem;
+    }
+
+    .units__act .act + .act {
+      margin-left: 0.5rem;
+    }
+  }
+</style>
+
+<script>
+  import { init } from '../../scripts/tools/convert-ui';
+
+  document.addEventListener('astro:page-load', init);
+</script>

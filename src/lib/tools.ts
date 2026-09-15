@@ -11,4 +11,9 @@ export const TOOLS: Tool[] = [
     name: 'colour',
     summary: 'pick, convert, compare.',
   },
+  {
+    slug: 'convert',
+    name: 'convert',
+    summary: 'units, measures, files.',
+  },
 ];

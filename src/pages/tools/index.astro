@@ -2,6 +2,7 @@
 import Base from '../../layouts/Base.astro';
 import ToolCard from '../../components/tools/ToolCard.astro';
 import ColourCard from '../../components/tools/ColourCard.astro';
+import ConvertCard from '../../components/tools/ConvertCard.astro';
 import { TOOLS } from '../../lib/tools';
 ---
 
@@ -14,6 +15,7 @@ import { TOOLS } from '../../lib/tools';
         {TOOLS.map((tool) => (
           <ToolCard name={tool.name} summary={tool.summary} href={`/tools/${tool.slug}/`}>
             {tool.slug === 'colour' && <ColourCard />}
+            {tool.slug === 'convert' && <ConvertCard />}
           </ToolCard>
         ))}
       </ul>
